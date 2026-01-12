@@ -1,0 +1,2221 @@
+function onOpen() {
+  var ui = SpreadsheetApp.getUi(); // Or DocumentApp, SlidesApp or FormApp.
+  ui.createMenu('Membership')
+      .addItem('Draft Emails', 'sendEmailsDialog')
+      .addItem('Print Mailing Labels', 'generateMailingLabels')
+      .addItem('Email Calendar Events', 'mailCalendarEvents')
+      .addItem('Update Members', 'updateMemberships')
+      .addToUi();
+}
+
+function doGet(e) {
+
+  // If the parameters are in place, just run the requested function
+  var number = e.parameter.number;
+  var memberApp = e.parameter.memberApp;
+  var subscriptionID = e.parameter.subscriptionID || '';
+  var username = e.parameter.username || '';
+
+  if (subscriptionID){
+    var su = getInfoBySubscriptionID(subscriptionID);
+    if (!su) {
+      su = new Object();
+    }
+    //var memNam = subscriptionID.publicName;
+    var memNam = su['Member Name'] || '';
+    var memSinDate = new Date(su['Member Since']) || '';
+    var memSin = memSinDate.getFullYear();
+    var memSta = su['Status'];
+    //return ContentService.createTextOutput(memNam + "/\n Member since: " + memSin);
+    //memObj = new Object();
+    //var jsonResponse = JSON.stringify(memObj);
+    //var finalResponse = ContentService.createTextOutput(jsonResponse).setMimeType(ContentService.MimeType.JSON);
+    //return finalResponse;
+    var verifyTemplate = HtmlService.createTemplateFromFile("Verify");
+    verifyTemplate.memberName = memNam || " ";
+    verifyTemplate.memberSince = memSin || " ";
+    verifyTemplate.memberStatus = memSta || " ";
+    verifyTemplate.subscriptionID = subscriptionID;
+    if (verifyTemplate.memberName == " ") {
+      if (verifyTemplate.memberStatus == " ") {
+        verifyTemplate.memberName = "Member not found";
+      }
+    }
+    var htmlOut = verifyTemplate.evaluate().setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return htmlOut;
+
+  } else if (username){
+    var su = getInfoByUsername(username);
+    if (!su) {
+      su = new Object();
+    }
+    //var memNam = subscriptionID.publicName;
+    var memNam = su['Member Name'] || '';
+    var memSinDate = new Date(su['Member Since']) || '';
+    var memSin = memSinDate.getFullYear();
+    var memSta = su['Status'];
+    //return ContentService.createTextOutput(memNam + "/\n Member since: " + memSin);
+    //memObj = new Object();
+    //var jsonResponse = JSON.stringify(memObj);
+    //var finalResponse = ContentService.createTextOutput(jsonResponse).setMimeType(ContentService.MimeType.JSON);
+    //return finalResponse;
+    var verifyTemplate = HtmlService.createTemplateFromFile("Verify");
+    verifyTemplate.memberName = memNam || " ";
+    verifyTemplate.memberSince = memSin || " ";
+    verifyTemplate.memberStatus = memSta || " ";
+    verifyTemplate.username = username;
+    if (verifyTemplate.memberName == " ") {
+      if (verifyTemplate.memberStatus == " ") {
+        verifyTemplate.memberName = "Member not found";
+      }
+    }
+    var htmlOut = verifyTemplate.evaluate().setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return htmlOut;
+
+  } else if (number) {
+    var result = createComicBookWithProperCredits(true, number);
+    return ContentService.createTextOutput("Member number " + number + " processed. " + result);
+
+  // If it's the member app, serve that
+  } else if (memberApp) {
+    return HtmlService.createHtmlOutputFromFile('Member')
+      .setTitle('Sloan\'s Lake Member Dashboard')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  // If there are no parameters, run the public web app
+  } else {
+    //var location1 = ScriptApp.getService().getUrl();
+    //var location2 = SitesApp.getActivePage().getUrl();
+    //var location3 = DocumentApp.getActiveDocument().getUrl();
+    //var h = "<html>Location: " + location3 + "</html>";
+    //return HtmlService.createHtmlOutput(h).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return HtmlService.createTemplateFromFile('Public').evaluate().setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  };
+}
+
+
+function getInfoBySubscriptionID(subscriptionID) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Members");
+  if (!sheet) {throw new Error('Sheet named "Members" not found');}
+  var data = sheet.getDataRange().getValues();
+  if (data.length === 0) {return null;}
+  var headers = data[0];
+  var subscriptionColumnIndex = headers.indexOf("Subscription ID");
+  if (subscriptionColumnIndex === -1) {throw new Error('Column "Subscription ID" not found');}
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (row[subscriptionColumnIndex] === subscriptionID) {
+      var resultObj = {};
+      for (var col = 0; col < headers.length; col++) {
+        resultObj[headers[col]] = row[col];
+      }
+      return resultObj;
+    }
+  }
+  return null;
+}
+
+
+
+function getInfoByUsername(username) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Volunteers");
+  if (!sheet) {throw new Error('Sheet named "Volunteers" not found');}
+  var data = sheet.getDataRange().getValues();
+  if (data.length === 0) {return null;}
+  var headers = data[0];
+  var subscriptionColumnIndex = headers.indexOf("Username");
+  if (subscriptionColumnIndex === -1) {throw new Error('Column "Username" not found');}
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (row[subscriptionColumnIndex] === username) {
+      var resultObj = {};
+      for (var col = 0; col < headers.length; col++) {
+        resultObj[headers[col]] = row[col];
+      }
+      return resultObj;
+    }
+  }
+  return null;
+}
+
+
+
+
+
+
+function printComicBook() {
+  createComicBookWithProperCredits();
+}
+
+function onboardMember() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Enter Subscription ID', 'Please enter Subscription ID to onboard new Member:', ui.ButtonSet.OK_CANCEL);
+  var subID = response.getResponseText();
+  if (response.getResponseText()) {
+    var resp = getInfoBySubscriptionID(subID);
+    ui.alert(resp['Member Name']);
+  } else {
+    ui.alert('No Subscription ID entered. Operation cancelled.');
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function updateMemberships() {
+
+  var SQUARE_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty('currentSquareAccessToken');
+  
+
+  // 2) Define the Square endpoints you’ll need
+  var subscriptionsUrl = 'https://connect.squareup.com/v2/subscriptions/search';
+
+  // 3) Prepare to fetch subscriptions (this example only does one page)
+  var headers = {
+    'Authorization': 'Bearer ' + SQUARE_ACCESS_TOKEN,
+    'Content-Type': 'application/json'
+  };
+
+  var options     = { method: 'get',  headers: headers, muteHttpExceptions: true };
+  var postOptions = { method: 'post', headers: headers, muteHttpExceptions: true };
+
+  Logger.log("About to start");
+
+  // 4Make the request to get all subscriptions
+  var response = UrlFetchApp.fetch(subscriptionsUrl, postOptions);
+  var responseCode = response.getResponseCode();
+  if (responseCode !== 200) {
+    Logger.log('Error fetching subscriptions. Response Code: ' + responseCode);
+    Logger.log(response.getContentText());
+    return;
+  }
+  Logger.log("Successfully fetched subscriptions");
+
+  var subscriptionsData = JSON.parse(response.getContentText());
+  var subscriptions = subscriptionsData.subscriptions || [];
+
+  /* ────────────  NEW: fetch additional pages when a cursor is returned  ──────────── */
+  var cursor = subscriptionsData.cursor || null;
+  while (cursor) {
+    var nextOptions = {
+      method         : 'post',
+      headers        : headers,
+      muteHttpExceptions : true,
+      contentType    : 'application/json',
+      payload        : JSON.stringify({ cursor: cursor })
+    };
+    var nextResp = UrlFetchApp.fetch(subscriptionsUrl, nextOptions);
+    if (nextResp.getResponseCode() !== 200) {
+      Logger.log('Error fetching additional subscriptions. Stopping pagination.');
+      break;
+    }
+    var nextData = JSON.parse(nextResp.getContentText());
+    if (nextData.subscriptions && nextData.subscriptions.length) {
+      subscriptions = subscriptions.concat(nextData.subscriptions);
+    }
+    cursor = nextData.cursor || null;  // stop when no further cursor
+  }
+  /* ──────────────────────────────────────────────────────────────────────────────── */
+
+  if (!subscriptions || subscriptions.length === 0) {
+    Logger.log('No subscriptions found.');
+    return;
+  }
+
+
+  var partnershipCatalogIDs = ['J73AAE5CNSVL7JI5M2BMGMWJ','RG3UXLGIZT6HHLZGLOSZT37B','RRKMZP53A7Y75A3LUPQTLCFC','JPSK4FNPQREMXPRGYEJ3K5WO','5BPONADIBXCHNSK3CXE6BDCM'];
+
+
+
+  // 5) Open the Google Sheet and select the "Members" sheet
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Members');
+  if (!sheet) {
+    sheet = ss.insertSheet('Members');
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // 6) *** MODIFIED SECTION ***
+  //     • Do NOT wipe the whole sheet.
+  //     • Build a header map (name → column index) so we can
+  //       update only the 16 columns your script manages.
+  // ────────────────────────────────────────────────────────────────
+  var headerValues = [
+    'Member Name',
+    'Status',
+    'Type',
+    'Amount',
+    'Email Address',
+    'Phone Number',
+    'Given Name',
+    'Family Name',
+    'Address Line 1',
+    'Address Line 2',
+    'Member 2',
+    'Member 3',
+    'Member 4',
+    'Honoree',
+    'Next Renewal',
+    'Member Since',
+    'Customer ID',
+    'Subscription ID',
+  ];
+
+  // read existing headers (keeps whatever order the user prefers)
+  var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headerMap = {};
+  existingHeaders.forEach(function (h, i) { headerMap[h] = i + 1; });
+
+  // add any missing required headers to the end
+  headerValues.forEach(function (h) {
+    if (!headerMap[h]) {
+      existingHeaders.push(h);
+      headerMap[h] = existingHeaders.length;
+      sheet.getRange(1, headerMap[h]).setValue(h);
+    }
+  });
+
+  // clear only the managed columns (rows 2‑end), leave all others alone
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    headerValues.forEach(function (h) {
+      var col = headerMap[h];
+      //sheet.getRange(2, col, lastRow - 1, 1).clearContent();
+    });
+  }
+  // ────────────────────────────────────────────────────────────────
+
+  var rows = [];
+
+  // 7) Loop over all subscriptions
+  subscriptions.forEach(function(subscription) {
+    //if (subscription.status !== 'ACTIVE') {
+    //  return; // skip non-ACTIVE subscriptions
+    //}
+    var subscriptionStatus = subscription.status;
+    var customerId = subscription.customer_id;
+    var subscriptionId = subscription.id;
+    var memberSinceRawDate = new Date(subscription.created_at);
+    var memberSince = Utilities.formatDate(memberSinceRawDate, 'America/Denver', 'MMM d, yyyy');
+    var renewalDateNum = subscription.monthly_billing_anchor_date || '';
+    var renewalDate = getNextDateOfMonth(renewalDateNum);
+    var canceledDate = subscription.canceled_date || '';
+    var note = subscription.note || '';
+    if (subscriptionStatus != "ACTIVE") {
+      renewalDate = '';
+    }
+    if (canceledDate) {
+      renewalDate = '';
+    }
+
+    var memberType = 'Member';
+
+    var member2prefix = 'Member #2 Name: ';
+    var member3prefix = 'Member #3 Name: ';
+    var member4prefix = 'Member #4 Name: ';
+    var partnerPrefix = 'Business Name, exactly as you want it to appear: ';
+    var honoreePrefix = 'Honoree Name, exactly as you want it to appear (or leave blank to stay anonymous): ';
+
+    // 8) Fetch the customer details
+    var customerUrl = 'https://connect.squareup.com/v2/customers/' + customerId;
+    var customerResponse = UrlFetchApp.fetch(customerUrl, options);
+    var customerRespCode = customerResponse.getResponseCode();
+    if (customerRespCode !== 200) {
+      Logger.log('Error fetching customer ' + customerId);
+      Logger.log(customerResponse.getContentText());
+      return;
+    }
+
+    var customerData = JSON.parse(customerResponse.getContentText());
+    var customer = customerData.customer;
+    if (!customer) {
+      return;
+    }
+
+    var email = customer.email_address || '';
+    var phoneText = customer.phone_number || '';
+    var phone = phoneText ? formatPhoneNumberForUS(phoneText) : '';
+    var givenName = customer.given_name || '';
+    var familyName = customer.family_name || '';
+
+    var addressLine1 = '';
+    var addressLine2 = '';
+    if (customer.address) {
+      var ad1 = customer.address.address_line_1 || '';
+      var ad2 = customer.address.address_line_2 || '';
+      addressLine1 = ad1;
+      if (ad2) {
+        addressLine1 = addressLine1 + ", " + ad2;
+      }
+      var ad3 = customer.address.locality || '';
+      var ad4 = customer.address.administrative_district_level_1 || '';
+      var ad5 = customer.address.postal_code || '';
+      addressLine2 = ad3 + ", " + ad4 + " " + ad5;
+    }
+
+    var companyName = customer.company_name || '';
+
+    // 9) Attempt to retrieve order info (unchanged logic)
+    var invoiceIds = subscription.invoice_ids || [];
+    var subscriptionOrderId = '';
+    var publicName = '';
+    var firstOrderId = '';
+    var subscriptionAmount = '';
+    var member2 = '';
+    var member3 = '';
+    var member4 = '';
+    var honoreeName = '';
+
+    if (invoiceIds.length > 0) {
+      var firstInvoiceId = invoiceIds[0];
+      var invoiceUrl = 'https://connect.squareup.com/v2/invoices/' + firstInvoiceId;
+      var invoiceResponse = UrlFetchApp.fetch(invoiceUrl, options);
+      if (invoiceResponse.getResponseCode() === 200) {
+        var invoiceData = JSON.parse(invoiceResponse.getContentText());
+        var invoice = invoiceData.invoice;
+        if (invoice && invoice.order_id) {
+          subscriptionOrderId = invoice.order_id;
+        }
+      }
+      firstOrderId = subscriptionOrderId;
+    }
+
+    if (invoiceIds.length > 0) {
+      var lastInvoiceId = invoiceIds[invoiceIds.length - 1];
+      var lastInvoiceUrl = 'https://connect.squareup.com/v2/invoices/' + lastInvoiceId;
+      var lastInvoiceResponse = UrlFetchApp.fetch(lastInvoiceUrl, options);
+      if (lastInvoiceResponse.getResponseCode() === 200) {
+        var lastInvoiceData = JSON.parse(lastInvoiceResponse.getContentText());
+        var lastInvoice = lastInvoiceData.invoice;
+        if (lastInvoice && lastInvoice.payment_requests) {
+          lastInvoiceRequests = invoice.payment_requests;
+          var thisRequest = lastInvoiceRequests[0];
+          if (thisRequest) {
+            subscriptionAmount = thisRequest.total_completed_amount_money.amount / 100;
+          }
+        }
+      }
+      firstOrderId = subscriptionOrderId;
+    }
+
+    // 10) If we got an order ID, fetch the order and attempt to read custom attribute
+    if (subscriptionOrderId) {
+      var orderUrl = 'https://connect.squareup.com/v2/orders/' + subscriptionOrderId;
+      var orderResponse = UrlFetchApp.fetch(orderUrl, options);
+      if (orderResponse.getResponseCode() === 200) {
+        var orderData = JSON.parse(orderResponse.getContentText());
+        var order = orderData.order;
+        if (order) {
+
+          const firstLineItem = order.line_items && order.line_items.length > 0
+                               ? order.line_items[0] : null;
+
+          if (partnershipCatalogIDs.includes(order.line_items[0].catalog_object_id)) {
+            memberType = 'Partner';
+          }
+
+          if (firstLineItem && firstLineItem.modifiers){
+            for (const thisLineHere in firstLineItem.modifiers) {
+              var thisMod = firstLineItem.modifiers[thisLineHere];
+              if (thisMod.name) {
+                var modName = thisMod.name;
+                if (modName.includes(member2prefix)) {
+                  member2 = getTextAfterPrefix(modName, member2prefix);
+                } else if (modName.includes(member3prefix)) {
+                  member3 = getTextAfterPrefix(modName, member3prefix);
+                } else if (modName.includes(member4prefix)) {
+                  member4 = getTextAfterPrefix(modName, member4prefix);
+                } else if (modName.includes('Public Name')) {
+                  publicName = getTextAfterPrefix(modName, partnerPrefix) || getAfterColon(modName);
+                } else if (modName.includes('Honoree Name')) {
+                  honoreeName = getTextAfterPrefix(modName, honoreePrefix) || getAfterColon(modName);
+                }
+                
+              }
+            }
+          }
+
+        }
+      }
+    }
+
+    if (companyName) {
+      publicName = companyName;
+    }
+
+    if (!publicName) {
+      publicName = givenName + " " + familyName;
+    }
+
+    if (note) {
+      var allSnippets = note.split(';');
+      for (var thisSnippet in allSnippets) {
+        var ts = allSnippets[thisSnippet];
+        if (ts.includes(member2prefix)) {
+          member2 = getTextAfterPrefix(ts,member2prefix);
+        } else if (ts.includes(member3prefix)) {
+          member3 = getTextAfterPrefix(ts,member3prefix);
+        } else if (ts.includes(member4prefix)) {
+          member4 = getTextAfterPrefix(ts,member4prefix);
+        } else if (ts.includes(partnerPrefix)) {
+          publicName = getTextAfterPrefix(ts,partnerPrefix);
+        } else if (ts.includes(honoreePrefix)) {
+          honoreeName = getTextAfterPrefix(ts,honoreePrefix);
+        }
+      }
+    }
+
+    // 11) Construct the row with all required fields
+    rows.push([
+      publicName,
+      subscriptionStatus,
+      memberType,
+      subscriptionAmount,
+      email,
+      phone,
+      givenName,
+      familyName,
+      addressLine1,
+      addressLine2,
+      member2,
+      member3,
+      member4,
+      honoreeName,
+      renewalDate,
+      memberSince,
+      customerId,
+      subscriptionId
+    ]);
+  });
+
+  // 12) Write the rows to the sheet (column‑by‑column so custom columns stay safe)
+  if (rows.length > 0) {
+    headerValues.forEach(function (h, i) {
+      var col = headerMap[h];
+      var colData = rows.map(function (r) { return [r[i]]; });
+      sheet.getRange(2, col, colData.length, 1).setValues(colData);
+    });
+  } else {
+    Logger.log('No active subscriptions or none processed.');
+  }
+}
+
+
+
+function getTextAfterPrefix(inputString, prefix) {
+  const index = inputString.indexOf(prefix);
+  if (index !== -1) {
+    return inputString.substring(index + prefix.length);
+  } else {
+    return ""; // or null if you prefer
+  }
+}
+
+
+
+
+function getAfterColon(str) {
+  const delimiter = ': ';
+  const index = str.indexOf(delimiter);
+  if (index === -1) {
+    // No occurrence of ': '
+    return '';
+  }
+  // Return everything after the delimiter
+  return str.slice(index + delimiter.length);
+}
+
+function getNextDateOfMonth(dayOfMonth) {
+  const now = new Date();
+  const currentDay = now.getDate();
+  let targetDate = new Date();
+
+  if (dayOfMonth > 31 || dayOfMonth < 1) {
+    return '';
+  }
+
+  if (dayOfMonth > currentDay) {
+    targetDate.setDate(dayOfMonth);
+  } else {
+    targetDate.setMonth(now.getMonth() + 1);
+    targetDate.setDate(dayOfMonth);
+  }
+  
+  const year = targetDate.getFullYear();
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const day = String(targetDate.getDate()).padStart(2, '0');
+
+  return Utilities.formatDate(targetDate, 'America/Denver', 'd MMM');
+}
+
+function formatPhoneNumberForUS(rawNumber) {
+  // This regex checks for '+1' followed by exactly 10 digits
+  var usPhonePattern = /^\+1\d{10}$/;
+
+  if (usPhonePattern.test(rawNumber)) {
+    // Remove the +1
+    var cleaned = rawNumber.substring(2);
+    // Format: (XXX) XXX-XXXX
+    var areaCode = cleaned.substring(0, 3);
+    var prefix = cleaned.substring(3, 6);
+    var lineNumber = cleaned.substring(6);
+    return "(" + areaCode + ") " + prefix + "-" + lineNumber;
+  } else {
+    // If it doesn't match a US number, return unchanged
+    return rawNumber;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+/**
+ * Build a Slides presentation (and PDF) of mailing labels for every ACTIVE member.
+ * Files are saved in the same Drive folder as the Slides template.
+ */
+function generateMailingLabels() {
+  /* ========== CONFIG ========== */
+  const TEMPLATE_ID       = '1JZRgnztnu6O7vPQUFLc2B85HygiYbciry-ro_8BOs-8';
+  const LABELS_PER_SLIDE  = 12;
+  const CARE_OF_SYMBOL    = '\u2105';          // ℅  (Unicode “care‑of”)
+
+  /* ---------- 1. Get member data ---------- */
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Mailings');
+  if (!sheet) throw new Error('Sheet “Mailings” not found.');
+
+  const data      = sheet.getDataRange().getValues();
+  if (data.length < 2) throw new Error('No member rows found.');
+
+  const [header]  = data;
+  const rows      = data.slice(1);
+
+  // Helper – locate a column case‑insensitively
+  const idx = label => {
+    const i = header.findIndex(h => h.toString().trim().toLowerCase() === label.toLowerCase());
+    if (i === -1) throw new Error(`Missing column “${label}”.`);
+    return i;
+  };
+
+  const COL = {
+    memberName : idx('Member Name'),
+    given      : idx('Given Name'),
+    family     : idx('Family Name'),
+    addr1      : idx('Address Line 1'),
+    addr2      : idx('Address Line 2'),
+    type       : idx('Type'),
+    member2    : header.findIndex(h => h.toString().match(/^Member 2$/i)),
+    member3    : header.findIndex(h => h.toString().match(/^Member 3$/i)),
+    member4    : header.findIndex(h => h.toString().match(/^Member 4$/i)),
+  };
+
+  const labels = [];
+  rows.forEach(r => {
+    
+    // Only allow members with active status
+    //if (r[COL.status].toString().trim().toUpperCase() !== 'ACTIVE') return;
+
+    const given  = (r[COL.given]  || '').toString().trim();
+    const family = (r[COL.family] || '').toString().trim();
+    const sheetMemberName = (r[COL.memberName] || '').toString().trim();
+    const addr1  = (r[COL.addr1] || '').toString().trim();
+    const addr2  = (r[COL.addr2] || '').toString().trim();
+    const fullName = `${given} ${family}`.trim();
+    const partType = (r[COL.type]  || '').toString().trim();
+    var isPartner = false;
+    if (partType == "Partner") {isPartner = true}
+    labels.push(makeLabel_(fullName, sheetMemberName, addr1, addr2, CARE_OF_SYMBOL, isPartner));
+
+    // Make lables for other members on the same subscription
+    //[COL.member2, COL.member3, COL.member4].forEach(c => {
+    //  if (c !== -1 && r[c]) {
+    //    const extra = r[c].toString().trim();
+    //    if (extra) labels.push(makeLabel_(extra, sheetMemberName, addr1, addr2, CARE_OF_SYMBOL));
+    //  }
+    //});
+  });
+
+  if (labels.length === 0) {
+    SpreadsheetApp.getUi().alert('No ACTIVE members found.');
+    return;
+  }
+
+  /* ---------- 2. Prepare Slides ---------- */
+  const templateFile = DriveApp.getFileById(TEMPLATE_ID);
+  const targetFolder = getParentFolder_(TEMPLATE_ID);   // save alongside template
+  const stamp        = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MMM d, yyyy');
+  const namePrefix = templateFile.getName();
+  const copyName     = namePrefix + ` ${stamp}`;
+
+  const copyFile = templateFile.makeCopy(copyName, targetFolder);
+  const pres     = SlidesApp.openById(copyFile.getId());
+
+  const neededSlides = Math.ceil(labels.length / LABELS_PER_SLIDE);
+  const masterSlide  = pres.getSlides()[0];
+
+  // Duplicate the blank template *before* we fill anything
+  for (let i = 1; i < neededSlides; i++) masterSlide.duplicate();
+
+  // Now fill each slide
+  const slides = pres.getSlides();
+  for (let s = 0; s < neededSlides; s++) {
+    const chunk = labels.slice(s * LABELS_PER_SLIDE, (s + 1) * LABELS_PER_SLIDE);
+    fillSlide_(slides[s], chunk);
+  }
+
+  /* ---------- 3. Save & export ---------- */
+  pres.saveAndClose();                 // commits all text‑replacements
+
+  const pdfBlob = copyFile.getBlob()
+                 .getAs('application/pdf')
+                 .setName(copyName + '.pdf');
+  const newPDF = targetFolder.createFile(pdfBlob);
+  Logger.log('✅ Labels saved in folder: ' + targetFolder.getName());
+  
+  
+  // Delete the presentation
+  Drive.Files.remove(copyFile.getId());
+  
+  var emailOb = {}
+  emailOb.subject = "New mailing labels to print!";
+  emailOb.to = "sean@sloanslakefoundation.org";
+  emailOb.name = "Sloan's Lake";
+  emailOb.body = "Let's get them printed and out into the world!";
+  emailOb.attachments = pdfBlob;
+  MailApp.sendEmail(emailOb);
+}
+
+/* ===== helper: construct a single label object ===== */
+function makeLabel_(displayName, memberNameOnSheet, addr1, addr2, coSymbol, needsCareOf) {
+  //const needsCO = memberNameOnSheet && memberNameOnSheet !== displayName;
+  const needsCO = needsCareOf;
+  const addressLine1 = needsCO ? `${coSymbol} ${memberNameOnSheet}\n${addr1}` : addr1;
+  return { name: displayName, address1: addressLine1, address2: addr2 };
+}
+
+/* ===== helper: fill placeholders on one slide ===== */
+function fillSlide_(slide, chunk) {
+  for (let i = 1; i <= 12; i++) {
+    if (chunk[i - 1]) {
+      const L = chunk[i - 1];
+      slide.replaceAllText(`{{member${i}_name}}`,     L.name);
+      slide.replaceAllText(`{{member${i}_address1}}`, L.address1);
+      slide.replaceAllText(`{{member${i}_address2}}`, L.address2);
+    } else {  // clear unused slots
+      slide.replaceAllText(`{{member${i}_name}}`,     '');
+      slide.replaceAllText(`{{member${i}_address1}}`, '');
+      slide.replaceAllText(`{{member${i}_address2}}`, '');
+    }
+  }
+}
+
+/* ===== helper: parent Drive folder of a file ID ===== */
+function getParentFolder_(fileId) {
+  const parents = DriveApp.getFileById(fileId).getParents();
+  return parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+}
+
+
+
+
+
+
+function updateMembershipCards() {
+  // Generate any membership cards for paying members
+  generateAllMembershipCards();
+
+  // Generate any membership cards for volunteers
+  generateVolunteerMembershipCards();
+}
+
+
+
+
+function generateAllMembershipCards(maxNumberOfCardsToPrint) {
+  const MAX = (typeof maxNumberOfCardsToPrint === 'number' && maxNumberOfCardsToPrint > 0)
+              ? maxNumberOfCardsToPrint
+              : Number.POSITIVE_INFINITY;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return;
+
+  try {
+    const ss        = SpreadsheetApp.getActiveSpreadsheet();
+    const membersSh = ss.getSheetByName('Members');
+    const cardsSh   = ss.getSheetByName('Cards') || ss.insertSheet('Cards');
+
+    /* ---------- ensure Cards header ---------- */
+    if (cardsSh.getLastRow() === 0) {
+      cardsSh.appendRow(['Member Name','Member Since','Subscription ID','Card URL','Timestamp']);
+    }
+
+    /* ---------- read Members ---------- */
+    const memData = membersSh.getDataRange().getValues();
+    const headers = memData.shift();
+    const col = h => headers.findIndex(x => x.toString().trim().toLowerCase() === h.toLowerCase());
+
+    const IDX = {
+      status  : col('Status'),
+      given   : col('Given Name'),
+      family  : col('Family Name'),
+      member2 : col('Member 2'),
+      member3 : col('Member 3'),
+      member4 : col('Member 4'),
+      since   : col('Member Since'),
+      subId   : col('Subscription ID'),
+      email   : col('Email Address')
+    };
+
+    /* ---------- load already‑printed IDs ---------- */
+    let printedIds = new Set();
+    const lastRow = cardsSh.getLastRow();        // header included
+    if (lastRow > 1) {
+      printedIds = new Set(
+        cardsSh.getRange(2, 3, lastRow - 1, 1).getValues()
+               .flat()
+               .filter(String)
+      );
+    }
+
+    /* ---------- build queue ---------- */
+    const queue = [];
+    memData.forEach(r => {
+      if (r[IDX.status].toString().trim().toUpperCase() !== 'ACTIVE') return;
+
+      const memberSince = r[IDX.since];
+      const baseId      = r[IDX.subId].toString().trim();
+      const memberEmail = r[IDX.email];
+      if (!baseId) return;
+
+      const primaryName = `${r[IDX.given]} ${r[IDX.family]}`.trim();
+      if (!printedIds.has(baseId)) queue.push({ name: primaryName, since: memberSince, id: baseId, email: memberEmail });
+
+      [
+        { col: IDX.member2, n: 2 },
+        { col: IDX.member3, n: 3 },
+        { col: IDX.member4, n: 4 }
+      ].forEach(({col, n}) => {
+        if (col !== -1 && r[col]) {
+          const extraName = r[col].toString().trim();
+          const extraId   = `${baseId}&memberNumber=${n}`;
+          if (!printedIds.has(extraId)) queue.push({ name: extraName, since: memberSince, id: extraId, email: memberEmail });
+        }
+      });
+    });
+
+    if (queue.length === 0) {
+      Logger.log('No new membership cards needed.');
+      return;
+    }
+
+    /* ---------- generate cards ---------- */
+    const results = [];
+    for (let i = 0; i < queue.length && results.length < MAX; i++) {
+      const { name, since, id, email } = queue[i];
+      try {
+        const cardFileOrUrl = generateMembershipCards(name, since, id, email);
+        const cardUrl = (cardFileOrUrl && cardFileOrUrl.getUrl)
+                        ? cardFileOrUrl.getUrl()
+                        : cardFileOrUrl;
+        results.push([name, since, id, cardUrl, new Date()]);
+      } catch (err) {
+        Logger.log(`Error generating card for ${name} (${id}): ${err}`);
+      }
+    }
+
+    /* ---------- append log rows ---------- */
+    if (results.length) {
+      cardsSh.getRange(cardsSh.getLastRow() + 1, 1, results.length, results[0].length)
+             .setValues(results);
+    }
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+
+
+function generateVolunteerMembershipCards() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName('Volunteers');
+  if (!sheet) {
+    throw new Error('Volunteers sheet not found.');
+  }
+
+  var dataRange = sheet.getDataRange();
+  var values = dataRange.getValues();
+  if (values.length < 2) {
+    return;
+  }
+
+  var headers = values[0];
+  var headerMap = {};
+  headers.forEach(function (header, index) {
+    headerMap[String(header).trim()] = index;
+  });
+
+  var requiredHeaders = [
+    'Status',
+    'Username',
+    'Given Name',
+    'Family Name',
+    'Email Address',
+    'Card URL',
+    'Member Since'
+  ];
+
+  requiredHeaders.forEach(function (header) {
+    if (headerMap[header] === undefined) {
+      throw new Error('Missing required column: ' + header);
+    }
+  });
+
+  var statusCol = headerMap['Status'];
+  var usernameCol = headerMap['Username'];
+  var givenNameCol = headerMap['Given Name'];
+  var familyNameCol = headerMap['Family Name'];
+  var emailCol = headerMap['Email Address'];
+  var cardUrlCol = headerMap['Card URL'];
+  var memberSinceCol = headerMap['Member Since'];
+
+  var cardUrlUpdates = [];
+  for (var rowIndex = 1; rowIndex < values.length; rowIndex++) {
+    var row = values[rowIndex];
+    var status = String(row[statusCol] || '').trim();
+    var username = String(row[usernameCol] || '').trim();
+    var givenName = String(row[givenNameCol] || '').trim();
+    var familyName = String(row[familyNameCol] || '').trim();
+    var emailAddress = String(row[emailCol] || '').trim();
+    var cardUrl = String(row[cardUrlCol] || '').trim();
+    var memberSince = String(row[memberSinceCol] || '').trim();
+
+    if (
+      status === 'ACTIVE' &&
+      username &&
+      givenName &&
+      familyName &&
+      emailAddress &&
+      memberSince
+    ) {
+      if (!cardUrl) {
+        var memberName = givenName + ' ' + familyName;
+        var generatedUrl = generateMembershipCards(
+          memberName,
+          memberSince,
+          username,
+          emailAddress,
+          username
+        );
+        cardUrlUpdates.push([generatedUrl]);
+      } else {
+        cardUrlUpdates.push([cardUrl]);
+      }
+    } else {
+      cardUrlUpdates.push([cardUrl]);
+    }
+  }
+
+  if (cardUrlUpdates.length > 0) {
+    sheet
+      .getRange(2, cardUrlCol + 1, cardUrlUpdates.length, 1)
+      .setValues(cardUrlUpdates);
+  }
+}
+
+
+
+
+
+
+function generateMembershipCards(memberName, memberSince, subscriptionID, emailAddress, usernameText) {
+
+  // Create Membership Card
+  var uniqueIdentifier = "subscriptionID=" + subscriptionID;
+  if (usernameText) {
+    uniqueIdentifier = "username=" + usernameText;
+  }
+  var membershipCardTemplate = DriveApp.getFileById('1HjEsS6Yl4mQuFc8DaHtVQjYNw35AewgM10M8XjXIC8I');
+  var cardsFolder = DriveApp.getFolderById('1WB_IZrwus-0un3s-SxI1-EiozV9SwBef');
+  var membershipCard = membershipCardTemplate.makeCopy(memberName + " - Print Membership Card");
+  membershipCard.moveTo(cardsFolder);
+  var membershipCardId = membershipCard.getId();
+  var memberSinceDate = new Date(memberSince);
+  var memberSinceFormatted = Utilities.formatDate(memberSinceDate, 'America/Denver', 'yyyy');
+  replaceTemplateTextInPresentation(membershipCardId, "memberName", memberName);
+  replaceTemplateTextInPresentation(membershipCardId, "membersince", memberSinceFormatted);
+  replaceTemplateTextInPresentation(membershipCardId, "username", subscriptionID);
+  insertQRCodeIntoSlide(membershipCardId, 0, "https://verify.sloanslakefoundation.org?" + uniqueIdentifier);
+  SlidesApp.openById(membershipCardId).saveAndClose();
+  var cardFile = convertDocToPdf(membershipCard, cardsFolder);
+  //membershipCard.setTrashed(true);
+
+  // Create Digital Membership Card
+  var digitalMembershipCardTemplate = DriveApp.getFileById('1pLqiJbTw5rPgYJTlLmIkvRziAZrbCT9X9_a5HfX2M38');
+  var digitalMembershipCard = digitalMembershipCardTemplate.makeCopy(memberName + " - Membership Card");
+  digitalMembershipCard.moveTo(cardsFolder);
+  var digitalMembershipCardId = digitalMembershipCard.getId();
+  replaceTemplateTextInPresentation(digitalMembershipCardId, "memberName", memberName);
+  replaceTemplateTextInPresentation(digitalMembershipCardId, "membersince", memberSinceFormatted);
+  replaceTemplateTextInPresentation(digitalMembershipCardId, "username", subscriptionID);
+  insertQRCodeIntoSlide(digitalMembershipCardId, 0, "https://verify.sloanslakefoundation.org?" + uniqueIdentifier, false, 266.1435783464567, 727.400643503937, 361.5148818897638);
+  SlidesApp.openById(digitalMembershipCardId).saveAndClose();
+  var digitalCardPDF = convertDocToPdf(digitalMembershipCard, cardsFolder);
+  var digitalCardPDFBlob = digitalCardPDF.getAs(MimeType.PDF);
+  var cardUrl = digitalCardPDF.getUrl();
+  //cardsFolder.createFile(digitalCardImageBlob);
+
+  // Send email to admin reminding to print the membership card
+  //MailApp.sendEmail('hello@sloanslakefoundation.org', 'New Member: ' + memberName, 'Time to print a new Membership Card for ' + memberName + '! ', {attachments: [cardFile.getAs(MimeType.PDF)]});
+
+  // Welcome the new member via email
+  var subj = "Welcome to Sloan's Lake!!"; // Must match template name exactly
+  var templateVariables = {};
+  templateVariables.memberName = memberName;
+  createEmailFromTemplate(subj, emailAddress, templateVariables, "live", digitalCardPDFBlob);
+
+  // Clean up files by deleting the pdfs
+  cardFile.setTrashed(true);
+  digitalCardPDF.setTrashed(true);
+
+  // Return the url of the newly printed membership card
+  return cardUrl;
+}
+
+
+function makeTestCard() {
+  generateMembershipCards('Santa Claus', 'May 11, 2011', 'oopsnotamember', 'sean@sloanslakefoundation.org');
+}
+
+
+function testLogImagePostions() {
+  logImagePositions('1pLqiJbTw5rPgYJTlLmIkvRziAZrbCT9X9_a5HfX2M38');
+}
+
+
+/**
+ * Logs every image’s position and size in the presentation.
+ * All values returned by Slides are in points (1 pt = ¹⁄₇₂ inch).
+ */
+function logImagePositions(presentationId) {
+  const pres   = SlidesApp.openById(presentationId);
+  const slides = pres.getSlides();
+  
+  slides.forEach((slide, slideIdx) => {
+    slide.getPageElements().forEach(pe => {
+      if (pe.getPageElementType() === SlidesApp.PageElementType.IMAGE) {
+        const imgId  = pe.getObjectId();
+        const leftPt = pe.getLeft();      // distance from left edge (pt)
+        const topPt  = pe.getTop();       // distance from top edge  (pt)
+        const widthPt  = pe.getWidth();   // width  (pt)
+        const heightPt = pe.getHeight();  // height (pt)
+        
+        // Convert points → inches for human-friendly output
+        const pt2in = v => (v / 72).toFixed(2); 
+        
+        Logger.log(
+          'Slide %s | Image %s → x: %s pt (%s in)  y: %s pt (%s in)  w: %s pt (%s in)  h: %s pt (%s in)',
+          slideIdx + 1, imgId,
+          leftPt,  pt2in(leftPt),
+          topPt,   pt2in(topPt),
+          widthPt, pt2in(widthPt),
+          heightPt,pt2in(heightPt)
+        );
+      }
+    });
+  });
+}
+
+
+
+
+
+/* ──────────────────────────────────────────────────────────────────
+ * Spreadsheet‑side Gmail draft generator
+ * – Lists every draft (built‑in Gmail Templates live here)
+ * – Lets the user pick a draft + a sheet
+ * – Produces personalised Gmail drafts, nothing is sent
+ * Sloan’s Lake • May 2025
+ * ──────────────────────────────────────────────────────────────────
+ */
+
+/* ===== 1. MAIN DIALOG ===== */
+function sendEmailsDialog() {
+  const ui = SpreadsheetApp.getUi();
+
+  // Build list of drafts (templates) ---------------------------------
+  const draftObjs = GmailApp.getDrafts();              // ALL drafts
+  if (!draftObjs.length) {
+    ui.alert('No Gmail drafts/templates were found in this account.');
+    return;
+  }
+  const draftItems = draftObjs.map(d => ({
+    id: d.getId(),
+    subject: d.getMessage().getSubject() || '(no subject)'
+  }));
+
+  // Build list of sheets ---------------------------------------------
+  const sheets = SpreadsheetApp.getActiveSpreadsheet()
+                .getSheets()
+                .map(s => s.getName());
+
+  // UI prompt – draft
+  const draftChoices = draftItems.map((d,i)=>`${i+1}. ${d.subject}`)
+                                 .join('\n');
+  const draftResp = ui.prompt(
+    'Select a Gmail template draft',
+    'Enter the number of the draft you want:\n\n' + draftChoices,
+    ui.ButtonSet.OK_CANCEL);
+  if (draftResp.getSelectedButton() !== ui.Button.OK) return;
+
+  const draftIndex = Number(draftResp.getResponseText().trim()) - 1;
+  if (isNaN(draftIndex) || draftIndex < 0 || draftIndex >= draftItems.length){
+    ui.alert('✖️ Invalid draft number.'); return;
+  }
+  const chosenDraft = draftItems[draftIndex];
+
+  // UI prompt – sheet
+  const sheetChoices = sheets.map((s,i)=>`${i+1}. ${s}`).join('\n');
+  const sheetResp = ui.prompt(
+    'Select a sheet',
+    'Enter the number of the sheet you want:\n\n' + sheetChoices,
+    ui.ButtonSet.OK_CANCEL);
+  if (sheetResp.getSelectedButton() !== ui.Button.OK) return;
+
+  const sheetIndex = Number(sheetResp.getResponseText().trim()) - 1;
+  if (isNaN(sheetIndex) || sheetIndex < 0 || sheetIndex >= sheets.length){
+    ui.alert('✖️ Invalid sheet number.'); return;
+  }
+  const chosenSheet = sheets[sheetIndex];
+
+  // Confirmation
+  const proceed = ui.alert(
+    'Confirm',
+    `Create drafts with:\n• Template: “${chosenDraft.subject}”\n• Sheet: “${chosenSheet}”`,
+    ui.ButtonSet.YES_NO);
+  if (proceed !== ui.Button.YES) return;
+
+  // Run generator
+  const n = generateDrafts_(chosenDraft.id, chosenSheet);
+  ui.alert(`✅ ${n} Gmail drafts created. Check your Drafts folder.`);
+}
+
+/* ===== 2. CORE GENERATOR ===== */
+function generateDrafts_(draftId, sheetName) {
+  // ---- Pull template draft -----------------------------------------
+  const draft   = GmailApp.getDraft(draftId);
+  const msg     = draft.getMessage();
+  const subjTpl = msg.getSubject() || '';
+  const bodyTpl = msg.getBody();                // HTML
+  const sig     = '--<br>' + Session.getActiveUser().getEmail();
+
+  // ---- Spreadsheet data --------------------------------------------
+  const ss   = SpreadsheetApp.getActiveSpreadsheet();
+  const sh   = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error(`Sheet “${sheetName}” not found`);
+
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) throw new Error('No data rows in sheet');
+
+  const headers = vals[0];
+  const rows    = vals.slice(1);
+
+  // Header → camelCase variable map (e.g. "Given Name" → "givenName")
+  const toVar = h => h.toString().trim()
+      .split(/\s+/)
+      .map((w,i)=> i ? w[0].toUpperCase() + w.slice(1) : w.toLowerCase())
+      .join('');
+  const headMap = {};
+  headers.forEach((h,i)=> headMap[toVar(h)] = i);
+
+  // Quick column indexes we expect
+  const idx = {
+    emailAddress : headMap.emailAddress,
+    emailCCs     : headMap.emailCCs,
+    givenName    : headMap.givenName,
+    familyName   : headMap.familyName
+  };
+
+  let made = 0;
+
+  rows.forEach(r => {
+    const email = r[idx.emailAddress] || '';
+    if (!email) return;                       // skip missing addresses
+
+    // Build row‑level variable map
+    const vars = {};
+    for (const v in headMap) vars[v] = r[headMap[v]] || '';
+
+    // Simple {{variable}} replacement
+    const repl = str => str.replace(/{{\s*([\w]+)\s*}}/g,
+      (_,v)=> vars[v] ?? '');
+
+    const subject = repl(subjTpl);
+    const body    = repl(bodyTpl) + '<br><br>' + sig;
+
+    const to  = `${vars.givenName} ${vars.familyName} <${email}>`;
+    const ccs = (vars.emailCCs || '')
+                  .toString()
+                  .replace(/\s+/g,'')
+                  .split(',')
+                  .filter(s=>s)
+                  .join(',');
+
+    GmailApp.createDraft(to, subject, '', {htmlBody: body, cc: ccs});
+    made++;
+  });
+
+  return made;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * NOTE – Reducing the draft list
+ * --------------------------------
+ * To show *only* your saved Gmail Templates (and not every draft),
+ * add a simple test inside getDrafts(), e.g.:
+ *
+ *   const draftObjs = GmailApp.getDrafts().filter(d =>
+ *       d.getMessage().getBody().includes('{{'));
+ *
+ * That keeps drafts whose body contains at least one {{variable}},
+ * which is usually true for templates but not ordinary drafts.
+ * ──────────────────────────────────────────────────────────────────
+ */
+
+
+
+
+
+/**
+ * Send (or draft) an email from a saved Gmail template.
+ *
+ * @param {string} templateSubject  – The exact subject line of the Gmail template to use.
+ * @param {string|string[]} to      – One email or an array/list of recipients.
+ * @param {Object} data             – Key/value pairs to replace e.g. {{memberName}}.
+ * @param {'test'|'live'} mode      – 'test'  = save draft,  'live' = send now.
+ */
+function createEmailFromTemplate(templateSubject, to, data, mode, attachment) {
+  if (!templateSubject || !to || !data || !mode) {
+    throw new Error('Missing required argument.');
+  }
+
+  /* 1. Find the draft that holds your template ------------------------ */
+  const templateDraft = GmailApp.getDrafts()
+    .find(d => d.getMessage().getSubject() === templateSubject);
+
+  if (!templateDraft) {
+    throw new Error(`Template with subject “${templateSubject}” not found in Drafts.`);
+  }
+
+  const msg      = templateDraft.getMessage();
+  let   subject  = msg.getSubject();
+  let   htmlBody = msg.getBody();          // HTML version keeps styling
+  let   textBody = msg.getPlainBody();     // Fallback plain-text
+
+  /* 2. Replace {{variables}} in subject & body ------------------------ */
+  const placeholderRE = /{{\s*([\w]+)\s*}}/g;   // Captures {{ memberName }} etc.
+
+  const replaceFn = (_, key) => (key in data ? data[key] : '');
+  subject  = subject .replace(placeholderRE, replaceFn);
+  htmlBody = htmlBody.replace(placeholderRE, replaceFn);
+  textBody = textBody.replace(placeholderRE, replaceFn);
+
+  /* 3. Send or draft --------------------------------------------------- */
+  const options = { htmlBody };
+  options.bcc = 'hello@sloanslakefoundation.org';
+  options.name = "Sloan's Lake";
+  if (attachment) {
+    options.attachments = [attachment];
+  };
+
+  if (mode === 'live') {
+    GmailApp.sendEmail(to, subject, textBody, options);
+  } else if (mode === 'test') {
+    GmailApp.createDraft(to, subject, textBody, options);
+  } else {
+    throw new Error(`Unknown mode “${mode}”. Use 'test' or 'live'.`);
+  }
+}
+
+/* ==== Example call =====================================================
+createEmailFromTemplate(
+  'Welcome to Sloan’s Lake',             // template subject
+  'member@example.com',                  // recipient (string or array)
+  { givenName: 'Sean', memberName: 'Sloan’s Lake Foundation' },
+  'test'                                 // 'test' = save draft, 'live' = send
+);
+======================================================================== */
+
+
+
+
+
+
+
+
+
+
+function mailCalendarEvents() {
+  var isFormatted = true;
+
+  const tz = Session.getScriptTimeZone() || 'America/Denver';           // adjust if needed
+  const today = new Date();                                             // current date
+  const firstOfNext = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const lastOfNext  = new Date(today.getFullYear(), today.getMonth() + 2, 0); // day 0 => last day previous month
+
+  const pattern = 'yyyy-MM-dd';
+  const firstStr = Utilities.formatDate(firstOfNext, tz, pattern);
+  const lastStr  = Utilities.formatDate(lastOfNext,  tz, pattern);
+
+  var numEvents = 0;
+
+  var nextMonth = Utilities.formatDate(lastOfNext, tz, "MMMM")
+  var nextMonthYear = firstOfNext.getFullYear();
+
+  var allEvents = listPublicCalendarEventsFormattedStyled('hello@sloanslakefoundation.org',firstStr,lastStr);
+  numEvents = allEvents.eventCountNum;
+  var eo = {};
+  eo.to = 'sean@sloanslakefoundation.org';
+  eo.subject = nextMonth + " " + nextMonthYear + ": " + numEvents + " Events";
+  eo.htmlBody = allEvents.htmlText;
+  eo.name = "Sloan's Lake"
+  MailApp.sendEmail(eo);
+}
+
+
+/**
+ * Fetches events from a public Google Calendar and returns HTML with:
+ *  - Day headers center-aligned & underlined
+ *  - Event time in italics
+ *  - Event title in bold
+ *  - Venue (and hyphen) normal
+ *  - All text in #45257c, Oswald Light (9pt, single-spaced)
+ *  - Hanging indent of 0.05in
+ *
+ * @param {string} calendarId   The public calendar’s ID
+ * @param {string} startDateStr ISO date for start (e.g. '2025-04-01')
+ * @param {string} endDateStr   ISO date for end   (e.g. '2025-04-30')
+ * @return {string}             HTML string you can insert into an email or webpage
+ */
+function listPublicCalendarEventsFormattedStyled(calendarId, startDateStr, endDateStr) {
+  var cal    = CalendarApp.getCalendarById(calendarId);
+  var start = new Date(startDateStr);
+  start.setDate(start.getDate() + 1);
+  var end   = new Date(endDateStr);
+  end.setDate(end.getDate() + 2);
+  var tz     = Session.getScriptTimeZone();
+  var events = cal.getEvents(start, end);
+  var eventCount = 0;
+  
+  // Outer container defines color, font, size, line spacing, and hanging indent
+  var html = '<div style="'
+           +   'color: #002040; '
+           +   'font-family: \'Oswald\', sans-serif; '
+           +   'font-weight: 300; '
+           +   'font-size: 9pt; '
+           + '">\n';
+  
+  var lastDayKey = '';
+  
+  events.forEach(function(evt) {
+    var s = evt.getStartTime();
+    var e = evt.getEndTime();
+    
+    // New-day header?
+    var dayKey = Utilities.formatDate(s, tz, 'yyyy-MM-dd');
+    if (dayKey !== lastDayKey) {
+      if (lastDayKey) {
+        html += '<br/>\n';  // blank line before each new day
+      }
+      var headerText = Utilities.formatDate(s, tz, 'EEEE, MMM d');
+      html += '<div style="text-align:center; text-decoration:underline;">'
+           +   headerText
+           + '</div>\n';
+      lastDayKey = dayKey;
+    }
+    
+    // Time formatting helper
+    function fmtHM(dt) {
+      var h = dt.getHours() % 12 || 12;
+      var m = dt.getMinutes();
+      return m ? h + ':' + (m < 10 ? '0' + m : m) : String(h);
+    }
+    var sMer = s.getHours() < 12 ? 'am' : 'pm';
+    var eMer = e.getHours() < 12 ? 'am' : 'pm';
+    
+    var startFmt, endFmt;
+    if (sMer === eMer) {
+      startFmt = fmtHM(s);
+      endFmt   = fmtHM(e) + eMer;
+    } else {
+      startFmt = fmtHM(s) + sMer;
+      endFmt   = fmtHM(e) + eMer;
+    }
+
+    // Tally this as an event in the total event count
+    eventCount++;
+    
+    // Build the line with HTML tags
+    var timeHtml  = '<i>' + startFmt + '-' + endFmt + '</i>';
+    var titleHtml = '<b style="font-weight:700;">' + evt.getTitle() + '</b>';
+    var loc       = evt.getLocation() || '';
+    var hyphen    = loc ? ' - ' : '';
+    
+    html += '<div>'
+         +   timeHtml + ' '
+         +   titleHtml
+         +   hyphen + loc
+         + '</div>\n';
+  });
+  
+  html += '</div>';
+  var returnObject = {};
+  returnObject.htmlText = html;
+  returnObject.eventCountNum = eventCount;
+  return returnObject;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Server-side function to get active members data
+function getActiveMembers() {
+  const sheet = SpreadsheetApp.openById(SpreadsheetApp.getActive().getId()).getSheetByName("Volunteers");
+  const data = sheet.getDataRange().getValues();
+
+  // Get the header row and locate the necessary columns
+  const headers = data[0];
+  const usernameIndex = headers.indexOf("Username");
+  const creditTypeIndex = headers.indexOf("Credit Type");
+  const publicNameIndex = headers.indexOf("Public Name");
+
+  if (usernameIndex === -1 || creditTypeIndex === -1 || publicNameIndex === -1) {
+    throw new Error("One or more required columns are missing (Username, Credit Type, Member Name). Check your spreadsheet headers.");
+  }
+
+  // Filter active members
+  const activeMembers = data.slice(1).filter(row => 
+    row[usernameIndex] && row[creditTypeIndex] && row[publicNameIndex]
+  ).map(row => ({
+    username: row[usernameIndex],
+    creditType: row[creditTypeIndex],
+    publicName: row[publicNameIndex]
+  }));
+
+  return activeMembers;
+}
+
+
+
+
+function getUserInfo() {
+  var userEmail = Session.getActiveUser().getEmail();
+  var userName = Session.getActiveUser().getEmail();  // You can fetch more details here if needed
+  return { email: userEmail, name: userName };
+}
+
+
+
+
+
+
+
+
+function createComicBookWithProperCredits(isNewMember, memberRowNumber) {
+
+  // Update with the current Credits presentation
+  var creditsPresentationId = '17w24ik02i7r7DT07KXCkDZqMjoIjY34WrBBJbeZfACo';
+
+  // Get the existing Google Slides presentation by its ID
+  var slidesPresentation = SlidesApp.openById(creditsPresentationId);
+
+  // Get the active spreadsheet
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Assuming the data is in the first sheet
+  var sheet = spreadsheet.getSheets()[0];
+
+  // Assuming the headers are in the first row
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Get the column indices for 'Public Name' and 'Credit Type'
+  var nameColumnIndex = headers.indexOf('Public Name') + 1;
+  var typeColumnIndex = headers.indexOf('Credit Type') + 1;
+  var contactNameColumnIndex = headers.indexOf('Contact Name') + 1;
+  var usernameColumnIndex = headers.indexOf('Username') + 1;
+  var folderColumnIndex = headers.indexOf('Folder') + 1;
+
+  // Get all data from the spreadsheet
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+  // Create an object to store names based on credit type
+  var namesByType = {};
+
+  // Create a string to hold the new member's name and info
+  var memberRowIndex = memberRowNumber || sheet.getLastRow();
+  var newMemberName = data[memberRowIndex - 2][nameColumnIndex - 1];
+  var newMemberContactName = data[memberRowIndex - 2][contactNameColumnIndex - 1];
+  var newMemberType = data[memberRowIndex - 2][typeColumnIndex - 1];
+  var newMemberUsername = data[memberRowIndex - 2][usernameColumnIndex - 1];
+  var newMemberInfo = data[memberRowIndex - 2];
+  var comicBookUrl = "";
+  Logger.log(newMemberName + " " + memberRowIndex);
+
+  var headerInfo = headers;
+  var shouldWePrint = true;
+  var shouldWeOnboard = true;
+
+  // See if we should onboard and/or if we should print
+  if (isNewMember) {
+    Logger.log("Found a new member: " + newMemberName);
+    if (newMemberType) {
+      // Looks like it's a duplicate
+      shouldWeOnboard = false;
+      shouldWePrint = false;
+    } else {
+      // Not a duplicate, so (if not anonymous) add the member with honorary thanks
+      if (newMemberName) {
+        newMemberType = "Special Thanks";
+      };
+      sheet.getRange(memberRowIndex, typeColumnIndex).setValue(newMemberType);
+      newMemberInfo[typeColumnIndex - 1] = newMemberType;
+
+      // Validate member name
+      if (!newMemberName) {
+        //If it's a new member but there's no name, don't print a book
+        shouldWePrint = false;
+        if (newMemberContactName) {
+          // If there's no public name, use contact name for member
+          newMemberName = newMemberContactName;
+        }
+      }
+
+      // Validate member username
+      if (!newMemberUsername) {
+        newMemberUsername = sanitizeEmailLocalPart(newMemberName);
+      }
+      newMemberUsername = newMemberUsername.toLowerCase();
+
+      // Create new member
+      var bothNames = splitFullName(newMemberName);
+      var firstName = bothNames.firstName;
+      var lastName = bothNames.lastName || firstName;
+      var username = newMemberUsername;
+      createNewUser(firstName, lastName, username);
+
+      // Add username to spreadsheet and info object
+      sheet.getRange(memberRowIndex, usernameColumnIndex).setValue(newMemberUsername);
+      newMemberInfo[usernameColumnIndex - 1] = newMemberUsername;
+
+    }
+
+  }
+
+  // Print comic book
+
+  // Iterate through the data and organize names by credit type
+  data.forEach(function (row) {
+    var name = row[nameColumnIndex - 1];
+    var type = row[typeColumnIndex - 1];
+    if (type) {
+      if (name) {
+        // See if there's multiple credits
+        if (type.indexOf(", ") !== -1){
+          var allTypes = type.split(", ");
+          for (var ty in allTypes) {
+            var thisType = allTypes[ty];
+            // If it's the first of it's type, create a new array for the names
+            if (!namesByType[thisType]) {
+              namesByType[thisType] = [];
+            }
+            // Add the name to the array for this type
+            namesByType[thisType].push(name);
+          }
+        // If there's not multiple credits, then it's just this one
+        } else {
+          // If it's the first of it's type, create a new array for the names
+          if (!namesByType[type]) {
+            namesByType[type] = [];
+          }
+          // Add the name to the array for this type
+          namesByType[type].push(name);
+        }
+      }
+    }
+  });
+
+  Logger.log(namesByType);
+  // Reverse the order of all names so newest members are listed first
+  for (var na in namesByType){
+    namesByType[na].reverse();
+  }
+  // Iterate through slides and update text boxes in the slides
+  var slides = slidesPresentation.getSlides();
+
+  // Add proper credits to the comic book
+  if (shouldWePrint) {
+    for (var i = 0; i < slides.length; i++) {
+      var slide = slides[i];
+      var textElements = slide.getShapes();
+      for (var j = 0; j < textElements.length; j++) {
+        var textElement = textElements[j];
+        var text = textElement.getText().asString(); // Convert to string
+        for (var k in namesByType) {
+          if (text.indexOf(k) !== -1) {
+            var nextNum = new Number(j-1);
+            textElement = textElements[nextNum];
+            text = textElement.getText().asString();
+            var creditType = k;
+            var allNames = namesByType[creditType];
+            if (allNames) {
+              var names = allNames.join(', ').toUpperCase();
+              textElement.getText().setText(names);
+            }
+          }
+        }
+      }
+    }
+
+    slidesPresentation.saveAndClose();
+
+    var finalFolderId = '1TMqMSGuIIyoSMbfAmeUoDIR6HuogBbS3';
+    var fileNameTemplate = slidesPresentation.getName();
+    var fileName = fileNameTemplate;
+    if (isNewMember) {
+      fileName = fileNameTemplate + " " + newMemberName;
+    }
+
+    // Now save the presentation as a pdf and save to a folder
+    comicBookUrl = saveCreditsAsPdf(fileName, creditsPresentationId, finalFolderId);
+  };
+
+  // If it's a new member, onboard them
+  if (shouldWeOnboard) {
+    if (isNewMember) {
+
+      // Create member's new folder
+      var newMemberFolder = createMemberFolder(newMemberName);
+
+      // Add folder to the spreadsheet and stuff
+      var newMemberFolderUrl = newMemberFolder.getUrl();
+      newMemberInfo[folderColumnIndex - 1] = newMemberFolderUrl;
+      sheet.getRange(memberRowIndex, folderColumnIndex).setValue(newMemberFolderUrl);
+
+      // If there's a comic book, move it to the folder and add to the object
+      if (comicBookUrl) {
+        var comicBookId = getIdFromUrl(comicBookUrl);
+        var comicBookFile = DriveApp.getFileById(comicBookId);
+        var comicBookFileName = comicBookFile.getName();
+        var personalizedName = comicBookFileName.replace("Sloan's Lake ", "");
+        personalizedName = personalizedName.replace(" " + newMemberName, "");
+        personalizedName = newMemberName + " - " + personalizedName + ".pdf";
+        comicBookFile.moveTo(newMemberFolder);
+        comicBookFile.setName(personalizedName);
+        headerInfo.push('Comic Book');
+        newMemberInfo.push(comicBookUrl);
+      }
+      onboardNewVolunteer(newMemberInfo, headerInfo);
+      return "Successfully onboarded " + newMemberName + ".";
+    }
+  } else {
+    return "Oops! Duplicate found.";
+  }
+
+}
+
+
+
+function onboardNewVolunteer(newMemberInfo, headerInfo) {
+
+  var emailColumnIndex = headerInfo.indexOf('Contact Email');
+  var nameColumnIndex = headerInfo.indexOf('Public Name');
+  var contactNameColumnIndex = headerInfo.indexOf('Contact Name');
+  var usernameColumnIndex = headerInfo.indexOf('Username');
+  var comicBookColumnIndex = headerInfo.indexOf('Comic Book');
+  var folderColumnIndex = headerInfo.indexOf('Folder');
+  var timestampColumnIndex = headerInfo.indexOf('Timestamp');
+
+  var memberEmail = newMemberInfo[emailColumnIndex];
+  var memberName = newMemberInfo[nameColumnIndex] || newMemberInfo[contactNameColumnIndex];
+  var contactName = newMemberInfo[contactNameColumnIndex] || newMemberInfo[nameColumnIndex];
+  var memberUsername = newMemberInfo[usernameColumnIndex];
+  var comicBookUrl = newMemberInfo[comicBookColumnIndex];
+  var memberFolderUrlText = newMemberInfo[folderColumnIndex];
+  
+  var memberFolderId = getIdFromUrl(memberFolderUrlText);
+  var memberFolder = DriveApp.getFolderById(memberFolderId);
+  var timestampText = newMemberInfo[timestampColumnIndex];
+  var joinDate = new Date(timestampText).getFullYear();
+  var memberUserEmail = memberUsername + "@sloanslakefoundation.org";
+  var adminRecipients = "Sean McGowan <sean@sloanslakefoundation.org>";
+  var memberEmailRecipient = memberName + " <" + memberEmail + ">";
+  var memberUserEmailRecipient = memberName + " <" + memberUserEmail + ">";
+  var alertText = "";
+  var lineNum = 0;
+
+  // Add user to member group
+  addToGroup(memberUserEmail, "members@sloanslakefoundation.org");
+
+  // Add member to volunteers group
+  addToGroup(memberUserEmail, "volunteers@sloanslakefoundation.org");
+  addToGroup(memberEmail, "volunteers@sloanslakefoundation.org");
+
+  // Add member to news groups
+  addEmailToAllNewsletters(memberEmail);
+  addEmailToAllNewsletters(memberUserEmail);
+
+  // Create Welcome Letter
+  var welcomeLetterTemplate = DriveApp.getFileById('15o-a6v-ieyIwzFrNZUg4oiDlC5z_zGfF2pxAbsjAgDM');
+  var welcomeLetter = welcomeLetterTemplate.makeCopy(memberName + " - Welcome Letter");
+  welcomeLetter.moveTo(memberFolder);
+  replaceTemplateText(welcomeLetter.getId(), "contactName", contactName);
+  replaceTemplateText(welcomeLetter.getId(), "memberName", memberName);
+  replaceTemplateText(welcomeLetter.getId(), "username", memberUsername);
+  DocumentApp.openById(welcomeLetter.getId()).saveAndClose();
+  convertDocToPdf(welcomeLetter, memberFolder);
+  welcomeLetter.setTrashed(true);
+
+  // Create Membership Card
+  var membershipCardTemplate = DriveApp.getFileById('1HjEsS6Yl4mQuFc8DaHtVQjYNw35AewgM10M8XjXIC8I');
+  var membershipCard = membershipCardTemplate.makeCopy(memberName + " - Membership Card");
+  membershipCard.moveTo(memberFolder);
+  var membershipCardId = membershipCard.getId();
+  replaceTemplateTextInPresentation(membershipCardId, "memberName", memberName);
+  replaceTemplateTextInPresentation(membershipCardId, "joinDate", joinDate);
+  replaceTemplateTextInPresentation(membershipCardId, "username", memberUsername);
+  insertQRCodeIntoSlide(membershipCardId, 0, "https://member.sloanslakefoundation.org/" + memberUsername);
+  SlidesApp.openById(membershipCardId).saveAndClose();
+  convertDocToPdf(membershipCard, memberFolder);
+  membershipCard.setTrashed(true);
+
+  // Create page on Members Website
+
+  // Add webpage link to homepage list of members
+
+  // Add member to list of members on Timesheet
+
+
+
+
+
+
+
+
+
+
+
+  // Add Sloan's Lake folder shortcut to *user's* My Drive
+  //var projectFolderID = "1TJu3ZPLFTefx4X2SWFMbI0MuJFjMdv94"; // Sloan's Lake official folder
+  //var shortcutName = "Sloan's Lake";
+  //var myDriveID = DriveApp..getRootFolder().getId();
+  //createShortcut(projectFolderID, shortcutName, myDriveID)
+
+  // Send welcome email to new user's internal email
+  var uno = {};
+  uno.to = memberUserEmailRecipient;
+  uno.bcc = adminRecipients;
+  uno.subject = "Welcome to Sloan's Lake!"
+  uno.body = "Howdy, " + memberName + "!\n\nWelcome to Sloan's Lake. As an Official Member of Sloan's Lake, you've got access to exclusive perks and more!\n\nClick here to get started: https://member.sloanslakefoundation.org \n\nYou can reply to this email or contact us via the above link if you ever have any ideas, questions or concerns.\n\nThank you and welcome,\n-Sloan's Lake Volunteers";
+  //uno.htmlBody = "";
+  uno.name = "Sloan's Lake";
+  MailApp.sendEmail(uno);
+
+  // Email login info to member's external contact email
+  var dos = {};
+  dos.to = memberEmailRecipient;
+  dos.bcc = adminRecipients;
+  dos.subject = "Welcome to Sloan's Lake! Here's your login credentials";
+  dos.body = "Howdy, " + memberName + "!\n\nWelcome to Sloan's Lake. As an Official Member, you can now login to access to exclusive perks and more!\n\nClick here to log in: https://member.sloanslakefoundation.org \n\nUsername: " + memberUsername + "\nTemporary password: ilovecartoons\n\nYou'll find more info in your new inbox. Please reply to this email if you run into any trouble logging in or accessing your member benefits.\n\nThank you,\n-Sloan's Lake Volunteers";
+  //uno.htmlBody = "";
+  dos.name = "Sloan's Lake";
+  MailApp.sendEmail(dos);
+
+
+
+  var alertHtml = '<html xmlns="http://www.w3.org/1999/xhtml">\
+	<head>\
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />\
+	<meta http-equiv="Content-Language" content="en-us" />\
+	</head><body>\
+	<div style="font-family:Lucida Grande, Lucida Sans Unicode, Tahoma, sans-serif;" >\
+  <table cellspacing="0" cellpadding="0" style="width:100%;border-bottom:1px solid #eee;font-size:12px;line-height:135%;font-family:Lucida Grande,Lucida Sans Unicode, Tahoma, sans-serif">';
+  
+  var htmlLine = '<tr style="background-color:$bg "><th style="vertical-align:top;color:#222;text-align:left;padding:7px 9px 7px 9px;border-top:1px solid #eee;margin-right:0px;">$field </th><td style="vertical-align:top;color:#333;width:60%;padding:7px 9px 7px 0;border-top:1px solid #eee;margin-left:0px;"><div>$value </div></td></tr>';
+
+  // Go through each header and build an email to send
+  for (var i = 0; i < headerInfo.length; i++) {
+    var titleText = headerInfo[i];
+    var contentText = newMemberInfo[i];
+    var thisLine = htmlLine;
+
+    if (contentText) {
+      // Reformate timestamp
+      if (titleText == "Timestamp") {
+        contentText = Utilities.formatDate(contentText, 'America/Denver', 'MMM d, yyyy hh:mm aaa')
+      }
+      if (titleText == "Agreement") {continue;};
+
+      // Make even and odd lines in ordered list
+      if (lineNum%2 == 0){
+        thisLine = thisLine.replace("$bg", "#ffffff");
+      } else {
+        thisLine = thisLine.replace("$bg", "#f5f5f5");
+      };
+
+      // Replace template variables
+      thisLine = thisLine.replace("$field", titleText);
+      thisLine = thisLine.replace("$value", contentText);
+      thisLine = thisLine.replace("\n", "<br />"); // Format text line breaks to html
+
+      // Add to text of the email
+      alertText = alertText + titleText + ": " + contentText + "\n";
+      alertHtml = alertHtml + thisLine;
+      //alertHtml = alertHtml + "<p>" + titleText + ": <strong>" + contentText + "</strong></p>";
+
+      lineNum++;
+    }
+  };
+
+  alertHtml = alertHtml + "</table></div></body></html>";
+
+  // Email the admins
+  var em = {};
+  em.to = adminRecipients;
+  em.subject = "New Member: " + memberName;
+  em.body = alertText;
+  em.htmlBody = alertHtml;
+  em.name = "Sloan's Lake";
+  MailApp.sendEmail(em);
+
+}
+
+
+
+function addEmailToAllNewsletters(emailA) {
+  //emailA = emailA || "Brietta.thacker@rmcad.edu"; // use for a one-time addition
+
+  // Add member to news group
+  addToGroup(emailA, "news@sloanslakefoundation.org");
+
+  // Add to Square Newsletter
+  addEmailToSquareNewsletter(emailA);
+
+  // Add to mailchimp newsletter
+  addSubscriberToMailChimp_SloansLake(emailA);
+
+}
+
+
+
+// Add email address to Square newsletter
+function addEmailToSquareNewsletter(emailAddy) {
+  //emailAddy = emailAddy || "oli.coyle@rmcad.edu"; // Add custom email for one-time addition
+  const accessToken = PropertiesService.getScriptProperties().getProperty('currentSquareAccessToken');
+  const squareApiUrl = 'https://connect.squareup.com/v2/customers';
+
+  // Create the customer payload
+  const customerData = {
+    email_address: emailAddy
+  };
+
+  // Create the request headers
+  const headers = {
+    'Authorization': 'Bearer ' + accessToken,
+    'Content-Type': 'application/json'
+  };
+
+  // Make the POST request to the Square API
+  const options = {
+    method: 'post',
+    headers: headers,
+    payload: JSON.stringify(customerData),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(squareApiUrl, options);
+    const result = JSON.parse(response.getContentText());
+
+    if (response.getResponseCode() === 200) {
+      Logger.log('Customer created successfully: ' + result.customer.id);
+      return result.customer.id;
+    } else {
+      Logger.log('Error creating customer: ' + result);
+      return null;
+    }
+  } catch (error) {
+    Logger.log('Request failed: ' + error);
+    return null;
+  }
+}
+
+
+function testMC() {
+  addSubscriberToMailChimp_SloansLake("sm@statesperson.com");
+}
+
+
+
+function addSubscriberToMailChimp_SloansLake(emailAddress) {
+
+  //Mailchimp details
+  const apiKey = PropertiesService.getScriptProperties().getProperty('currentMailchimpAccessToken');
+  const serverPrefix = apiKey.split('-')[1];
+  const listID = 'a1fbd12c80';
+
+  //ISO formatted date
+  const date = new Date();
+  const dateString = date.toISOString();
+  const formattedDateString = dateString.replace('T', ' ').slice(0, dateString.indexOf('.'));
+
+  //Payload/body
+  const payload = {
+    'email_address': emailAddress,
+    'status': 'subscribed',
+    'timestamp_signup': formattedDateString,
+    'tags': ['Magically added'],
+  };
+
+  //API URL and endpoint
+  const url = `https://${serverPrefix}.api.mailchimp.com/3.0/lists/${listID}/members`;
+
+  //Parameters for API call
+  const params = {
+    'method': 'POST',
+    'muteHttpExceptions': true,
+    'headers': {
+      'Authorization': `apikey ${apiKey}`,
+    },
+    'payload': JSON.stringify(payload),
+  };
+
+  //API call
+  var res = UrlFetchApp.fetch(url, params);
+  Logger.log(res);
+
+}
+
+
+
+
+
+function insertQRCodeIntoSlide(presentationId, slideIndex, url, invertColors, xPoint, yPoint, imgWidth) {
+
+  // Position the qr code
+  var leftPoint = xPoint || 45.799751574803146;
+  var topPoint = yPoint || 88.17996968503937;
+  var qrWidth = imgWidth || 36.151535433070855;
+  var qrHeight = qrWidth;
+
+  // Generate the QR code
+  var qrColor = '0060E6'; // 0080ff is pure blue
+  var qrBgcolor = 'FFE100';
+  if (invertColors) {
+    qrBgcolor = '0060E6';
+    qrColor = 'FFE100';
+  }
+  var qrSize = 600;
+  var qrCodeUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=' + qrSize + 'x' + qrSize + '&color=' + qrColor + '&bgcolor=' + qrBgcolor + '&data=' + encodeURIComponent(url);
+
+  // Get the presentation and slide
+  var presentation = SlidesApp.openById(presentationId);
+  var slides = presentation.getSlides();
+  var slide = slides[slideIndex];
+
+  // Insert the QR code image into the slide
+  slide.insertImage(qrCodeUrl, leftPoint, topPoint, qrWidth, qrHeight);
+}
+
+
+
+
+
+
+function replaceTemplateTextInPresentation(presentationTemplateID, variableName, variableValue) {
+
+  /* load Membership slide deck */
+  var deckId = presentationTemplateID;
+  var deck = SlidesApp.openById(deckId);
+  var slides = deck.getSlides();
+  
+  /* loop through slide deck slides and replace tokens with variable values */
+  slides.forEach(function(slide){
+     var shapes = (slide.getShapes());
+     shapes.forEach(function(shape){
+       shape.getText().replaceAllText('{{' + variableName + '}}', variableValue);
+     }); 
+   })
+
+}
+
+
+function convertDocToPdf(documentToConvert, folderToReside) {
+  const blob = documentToConvert.getAs('application/pdf');
+  const file = folderToReside.createFile(blob);
+  return file;
+}
+
+
+function replaceTemplateText(templateDocumentID, variableName, variableValue){
+  var templateDocumentID = templateDocumentID;
+  var variableName = variableName;
+  var variableValue = variableValue;
+
+  const replaceTextLang = variableValue;
+  const searchTextLang = "{{" + variableName + "}}";
+
+  const body = DocumentApp.openById(templateDocumentID).getBody();
+  let search = body.findText(searchTextLang);
+  while (search) {
+    var text = search.getElement().asText();
+    text.replaceText(searchTextLang, replaceTextLang);
+    search = body.findText(searchTextLang, search);
+  }
+
+}
+
+
+function getIdFromUrl(urlToGetIdFrom) { return urlToGetIdFrom.match(/[-\w]{25,}/); }
+
+
+
+function createMemberFolder(memberName) {
+  var parentFolder = DriveApp.getFolderById('1dyMYiWmlWZN2Jq4DLhuK-yeeG2M_gBY_');
+  var createdMemberFolder = DriveApp.createFolder(memberName);
+  createdMemberFolder.moveTo(parentFolder);
+  return createdMemberFolder;
+}
+
+
+
+function sanitizeEmailLocalPart(input) {
+  // Define the allowed characters
+  var allowedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_+";
+
+  // Initialize an empty string to store the sanitized result
+  var sanitized = "";
+
+  // Loop through each character in the input string
+  for (var i = 0; i < input.length; i++) {
+    var char = input.charAt(i);
+    // If the character is in the allowed list, add it to the sanitized string
+    if (allowedChars.indexOf(char) !== -1) {
+      sanitized += char;
+    }
+  }
+
+  // Return the sanitized result
+  return sanitized;
+}
+
+
+
+
+// Adds a user to a Google Group
+function addToGroup(memberEmail, groupEmail) {
+  var userEmail = memberEmail;
+  var groupId = groupEmail;
+  //var group = GroupsApp.getGroupByEmail(groupId);
+
+  var newMember = {email: userEmail, role: "MEMBER"};
+  try {
+    var response = AdminDirectory.Members.insert(newMember, groupId);
+    Logger.log("Woohoo! " + response);
+  } catch(e) {
+    Logger.log("Oops!" + e);
+  }
+}
+
+
+
+function createNewUser(firstName, lastName, username) {
+  // Replace with your domain
+  var domain = 'sloanslakefoundation.org';
+  
+  // Replace with the details of the new user
+  var primaryEmail = username + '@' + domain;
+  var password = 'ilovecartoons';
+
+  // Create a new user
+  var user = {
+    primaryEmail: primaryEmail,
+    name: {
+      givenName: firstName,
+      familyName: lastName,
+    },
+    password: password,
+    changePasswordAtNextLogin: true, // Forces the user to change the password at next login
+  };
+
+  try {
+    // Insert the user in Google Workspace
+    var newUser = AdminDirectory.Users.insert(user);
+    Logger.log('User created: %s (%s)', newUser.name.fullName, newUser.primaryEmail);
+
+    // Optional: Add the user to a specific organizational unit (OU)
+    var ouPath = "/Sloan's Lake"; // Replace with your OU path
+    newUser.orgUnitPath = ouPath;
+    AdminDirectory.Users.update(newUser, newUser.id);
+    Logger.log('User moved to OU: %s', ouPath);
+
+    // Optional: Add the user to a group
+    var groupEmail = 'members@' + domain; // Replace with your group email
+    addToGroup(newUser.primaryEmail, groupEmail);
+    //AdminDirectory.Members.insert({
+    //  email: newUser.primaryEmail,
+    //  role: 'MEMBER',
+    //}, groupEmail);
+    //Logger.log('User added to group: %s', groupEmail);
+
+    // Optional: Set custom user attributes
+    //var customSchemas = {
+    //  "EmployeeDetails": {
+    //    "EmployeeID": "12345", // Replace with actual employee ID
+    //    "Department": "Sales", // Replace with actual department
+    //    "Location": "New York", // Replace with actual location
+    //  }
+    //};
+    //newUser.customSchemas = customSchemas;
+    //AdminDirectory.Users.update(newUser, newUser.id);
+    //Logger.log('Custom attributes set for user.');
+
+  } catch (e) {
+    Logger.log('Error creating user: %s', e.message);
+  }
+}
+
+function splitFullName(fullName) {
+  // Trim any extra spaces at the start or end of the full name
+  fullName = fullName.trim();
+  
+  // Split the full name by spaces
+  var nameParts = fullName.split(' ');
+
+  var firstName = "";
+  var lastName = "";
+
+  if (nameParts.length == 1) {
+    // If there's only one word, assume it's the first name
+    firstName = nameParts[0];
+  } else if (nameParts.length == 2) {
+    // If there are two words, assume the first is the first name and the second is the last name
+    firstName = nameParts[0];
+    lastName = nameParts[1];
+  } else if (nameParts.length > 2) {
+    // If there are more than two words, assume the last word is the last name and the rest are part of the first name
+    firstName = nameParts.slice(0, -1).join(' ');
+    lastName = nameParts.slice(-1)[0];
+  }
+
+  return {
+    firstName: firstName,
+    lastName: lastName
+  };
+}
+
+
+
+
+function saveCreditsAsPdf(fileName,fileId,folderId) {
+
+  var thisFileName = fileName = fileName || "Credits";
+  var thisFolderId = folderId;
+
+  // Get the presentation as a PDF
+  //var presentation = SlidesApp.openById(creditsPresentationId);
+  var pres = DriveApp.getFileById(fileId);
+  var presPDF = pres.getAs('application/pdf');
+
+  // Get the destination folder
+  var destinationFolder = DriveApp.getFolderById(thisFolderId);
+
+  // Create the PDF file in the specified folder
+  var pdfFile = destinationFolder.createFile(presPDF).setName(thisFileName);
+  
+  Logger.log('PDF created and saved to Google Drive: %s', pdfFile.getUrl());
+
+  return pdfFile.getUrl();
+}
