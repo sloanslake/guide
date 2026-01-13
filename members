@@ -175,7 +175,397 @@ function onboardMember() {
 
 
 
+
+
+
+
 function updateMemberships() {
+
+  var numberToDoAtOnce = 2000;
+  var numberToTakeABreak = 20;
+  var secondsToBreakFor = 20;
+
+  var SQUARE_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty('currentSquareAccessToken');
+  
+
+  // 2) Define the Square endpoints you’ll need
+  var subscriptionsUrl = 'https://connect.squareup.com/v2/subscriptions/search';
+
+  // 3) Prepare to fetch subscriptions (this example only does one page)
+  var headers = {
+    'Authorization': 'Bearer ' + SQUARE_ACCESS_TOKEN,
+    'Content-Type': 'application/json'
+  };
+
+  var options     = { method: 'get',  headers: headers, muteHttpExceptions: true };
+  var postOptions = { method: 'post', headers: headers, muteHttpExceptions: true };
+
+  Logger.log("About to start");
+
+  // 4Make the request to get all subscriptions
+  var response = UrlFetchApp.fetch(subscriptionsUrl, postOptions);
+  var responseCode = response.getResponseCode();
+  if (responseCode !== 200) {
+    Logger.log('Error fetching subscriptions. Response Code: ' + responseCode);
+    Logger.log(response.getContentText());
+    return;
+  }
+  Logger.log("Successfully fetched subscriptions");
+
+  var subscriptionsData = JSON.parse(response.getContentText());
+  var subscriptions = subscriptionsData.subscriptions || [];
+
+  /* ────────────  NEW: fetch additional pages when a cursor is returned  ──────────── */
+  var cursor = subscriptionsData.cursor || null;
+  while (cursor) {
+    var nextOptions = {
+      method         : 'post',
+      headers        : headers,
+      muteHttpExceptions : true,
+      contentType    : 'application/json',
+      payload        : JSON.stringify({ cursor: cursor })
+    };
+    var nextResp = UrlFetchApp.fetch(subscriptionsUrl, nextOptions);
+    if (nextResp.getResponseCode() !== 200) {
+      Logger.log('Error fetching additional subscriptions. Stopping pagination.');
+      break;
+    }
+    var nextData = JSON.parse(nextResp.getContentText());
+    if (nextData.subscriptions && nextData.subscriptions.length) {
+      subscriptions = subscriptions.concat(nextData.subscriptions);
+    }
+    cursor = nextData.cursor || null;  // stop when no further cursor
+  }
+  /* ──────────────────────────────────────────────────────────────────────────────── */
+
+  if (!subscriptions || subscriptions.length === 0) {
+    Logger.log('No subscriptions found.');
+    return;
+  }
+
+
+  var partnershipCatalogIDs = ['J73AAE5CNSVL7JI5M2BMGMWJ','RG3UXLGIZT6HHLZGLOSZT37B','RRKMZP53A7Y75A3LUPQTLCFC','JPSK4FNPQREMXPRGYEJ3K5WO','5BPONADIBXCHNSK3CXE6BDCM'];
+
+
+
+  // 5) Open the Google Sheet and select the "Members" sheet
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Members');
+  if (!sheet) {
+    sheet = ss.insertSheet('Members');
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // 6) *** MODIFIED SECTION ***
+  //     • Do NOT wipe the whole sheet.
+  //     • Build a header map (name → column index) so we can
+  //       update only the 16 columns your script manages.
+  // ────────────────────────────────────────────────────────────────
+  var headerValues = [
+    'Member Name',
+    'Status',
+    'Type',
+    'Amount',
+    'Email Address',
+    'Phone Number',
+    'Given Name',
+    'Family Name',
+    'Address Line 1',
+    'Address Line 2',
+    'Member 2',
+    'Member 3',
+    'Member 4',
+    'Honoree',
+    'Next Renewal',
+    'Member Since',
+    'Customer ID',
+    'Subscription ID',
+  ];
+
+  // read existing headers (keeps whatever order the user prefers)
+  var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headerMap = {};
+  existingHeaders.forEach(function (h, i) { headerMap[h] = i + 1; });
+
+  // add any missing required headers to the end
+  headerValues.forEach(function (h) {
+    if (!headerMap[h]) {
+      existingHeaders.push(h);
+      headerMap[h] = existingHeaders.length;
+      sheet.getRange(1, headerMap[h]).setValue(h);
+    }
+  });
+
+  // clear only the managed columns (rows 2‑end), leave all others alone
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    headerValues.forEach(function (h) {
+      var col = headerMap[h];
+      //sheet.getRange(2, col, lastRow - 1, 1).clearContent();
+    });
+  }
+  // ────────────────────────────────────────────────────────────────
+
+  var currentRow = 2;
+  var maxRow = new Number(currentRow+numberToDoAtOnce);
+
+  // 7) Loop over all subscriptions
+  subscriptions.forEach(function(subscription) {
+    //if (subscription.status !== 'ACTIVE') {
+    //  return; // skip non-ACTIVE subscriptions
+    //}
+    if (currentRow > maxRow) {
+      return;
+    }
+
+  if (currentRow % numberToTakeABreak == 0) {
+    Logger.log("We'll return after this short break.");
+    Utilities.sleep(secondsToBreakFor*1000);
+  }
+
+
+    var subscriptionStatus = subscription.status;
+    var customerId = subscription.customer_id;
+    var subscriptionId = subscription.id;
+    var memberSinceRawDate = new Date(subscription.created_at);
+    var memberSince = Utilities.formatDate(memberSinceRawDate, 'America/Denver', 'MMM d, yyyy');
+    var renewalDateNum = subscription.monthly_billing_anchor_date || '';
+    var renewalDate = getNextDateOfMonth(renewalDateNum);
+    var canceledDate = subscription.canceled_date || '';
+    var note = subscription.note || '';
+    if (subscriptionStatus != "ACTIVE") {
+      renewalDate = '';
+    }
+    if (canceledDate) {
+      renewalDate = '';
+    }
+
+    var memberType = 'Member';
+
+    var member2prefix = 'Member #2 Name: ';
+    var member3prefix = 'Member #3 Name: ';
+    var member4prefix = 'Member #4 Name: ';
+    var partnerPrefix = 'Business Name, exactly as you want it to appear: ';
+    var honoreePrefix = 'Honoree Name, exactly as you want it to appear (or leave blank to stay anonymous): ';
+
+    // 8) Fetch the customer details
+    var customerUrl = 'https://connect.squareup.com/v2/customers/' + customerId;
+    var customerResponse = UrlFetchApp.fetch(customerUrl, options);
+    var customerRespCode = customerResponse.getResponseCode();
+    if (customerRespCode !== 200) {
+      Logger.log('Error fetching customer ' + customerId);
+      Logger.log(customerResponse.getContentText());
+      return;
+    }
+
+    var customerData = JSON.parse(customerResponse.getContentText());
+    var customer = customerData.customer;
+    if (!customer) {
+      return;
+    }
+
+    var email = customer.email_address || '';
+    var phoneText = customer.phone_number || '';
+    var phone = phoneText ? formatPhoneNumberForUS(phoneText) : '';
+    var givenName = customer.given_name || '';
+    var familyName = customer.family_name || '';
+
+    Logger.log(givenName + " " + familyName);
+
+    var addressLine1 = '';
+    var addressLine2 = '';
+    if (customer.address) {
+      var ad1 = customer.address.address_line_1 || '';
+      var ad2 = customer.address.address_line_2 || '';
+      addressLine1 = ad1;
+      if (ad2) {
+        addressLine1 = addressLine1 + ", " + ad2;
+      }
+      var ad3 = customer.address.locality || '';
+      var ad4 = customer.address.administrative_district_level_1 || '';
+      var ad5 = customer.address.postal_code || '';
+      addressLine2 = ad3 + ", " + ad4 + " " + ad5;
+    }
+
+    var companyName = customer.company_name || '';
+
+    // 9) Attempt to retrieve order info (unchanged logic)
+    var invoiceIds = subscription.invoice_ids || [];
+    var subscriptionOrderId = '';
+    var publicName = '';
+    var firstOrderId = '';
+    var subscriptionAmount = '';
+    var member2 = '';
+    var member3 = '';
+    var member4 = '';
+    var honoreeName = '';
+
+    if (invoiceIds.length > 0) {
+      var firstInvoiceId = invoiceIds[0];
+      var invoiceUrl = 'https://connect.squareup.com/v2/invoices/' + firstInvoiceId;
+      var invoiceResponse = UrlFetchApp.fetch(invoiceUrl, options);
+      if (invoiceResponse.getResponseCode() === 200) {
+        var invoiceData = JSON.parse(invoiceResponse.getContentText());
+        var invoice = invoiceData.invoice;
+        if (invoice && invoice.order_id) {
+          subscriptionOrderId = invoice.order_id;
+        }
+      }
+      firstOrderId = subscriptionOrderId;
+    }
+
+    if (invoiceIds.length > 0) {
+      var lastInvoiceId = invoiceIds[invoiceIds.length - 1];
+      var lastInvoiceUrl = 'https://connect.squareup.com/v2/invoices/' + lastInvoiceId;
+      var lastInvoiceResponse = UrlFetchApp.fetch(lastInvoiceUrl, options);
+      if (lastInvoiceResponse.getResponseCode() === 200) {
+        var lastInvoiceData = JSON.parse(lastInvoiceResponse.getContentText());
+        var lastInvoice = lastInvoiceData.invoice;
+        if (lastInvoice && lastInvoice.payment_requests) {
+          lastInvoiceRequests = invoice.payment_requests;
+          var thisRequest = lastInvoiceRequests[0];
+          if (thisRequest) {
+            subscriptionAmount = thisRequest.total_completed_amount_money.amount / 100;
+          }
+        }
+      }
+      firstOrderId = subscriptionOrderId;
+    }
+
+    // 10) If we got an order ID, fetch the order and attempt to read custom attribute
+    if (subscriptionOrderId) {
+      var orderUrl = 'https://connect.squareup.com/v2/orders/' + subscriptionOrderId;
+      var orderResponse = UrlFetchApp.fetch(orderUrl, options);
+      if (orderResponse.getResponseCode() === 200) {
+        var orderData = JSON.parse(orderResponse.getContentText());
+        var order = orderData.order;
+        if (order) {
+
+          const firstLineItem = order.line_items && order.line_items.length > 0
+                               ? order.line_items[0] : null;
+
+          if (partnershipCatalogIDs.includes(order.line_items[0].catalog_object_id)) {
+            memberType = 'Partner';
+          }
+
+          if (firstLineItem && firstLineItem.modifiers){
+            for (const thisLineHere in firstLineItem.modifiers) {
+              var thisMod = firstLineItem.modifiers[thisLineHere];
+              if (thisMod.name) {
+                var modName = thisMod.name;
+                if (modName.includes(member2prefix)) {
+                  member2 = getTextAfterPrefix(modName, member2prefix);
+                } else if (modName.includes(member3prefix)) {
+                  member3 = getTextAfterPrefix(modName, member3prefix);
+                } else if (modName.includes(member4prefix)) {
+                  member4 = getTextAfterPrefix(modName, member4prefix);
+                } else if (modName.includes('Public Name')) {
+                  publicName = getTextAfterPrefix(modName, partnerPrefix) || getAfterColon(modName);
+                } else if (modName.includes('Honoree Name')) {
+                  honoreeName = getTextAfterPrefix(modName, honoreePrefix) || getAfterColon(modName);
+                }
+                
+              }
+            }
+          }
+
+        }
+      }
+    }
+
+    if (companyName) {
+      publicName = companyName;
+    }
+
+    if (!publicName) {
+      publicName = givenName + " " + familyName;
+    }
+
+    if (note) {
+      var allSnippets = note.split(';');
+      for (var thisSnippet in allSnippets) {
+        var ts = allSnippets[thisSnippet];
+        if (ts.includes(member2prefix)) {
+          member2 = getTextAfterPrefix(ts,member2prefix);
+        } else if (ts.includes(member3prefix)) {
+          member3 = getTextAfterPrefix(ts,member3prefix);
+        } else if (ts.includes(member4prefix)) {
+          member4 = getTextAfterPrefix(ts,member4prefix);
+        } else if (ts.includes(partnerPrefix)) {
+          publicName = getTextAfterPrefix(ts,partnerPrefix);
+        } else if (ts.includes(honoreePrefix)) {
+          honoreeName = getTextAfterPrefix(ts,honoreePrefix);
+        }
+      }
+    }
+
+    // 11) Construct the row with all required fields
+    var row = [
+      publicName,
+      subscriptionStatus,
+      memberType,
+      subscriptionAmount,
+      email,
+      phone,
+      givenName,
+      familyName,
+      addressLine1,
+      addressLine2,
+      member2,
+      member3,
+      member4,
+      honoreeName,
+      renewalDate,
+      memberSince,
+      customerId,
+      subscriptionId
+    ];
+
+    headerValues.forEach(function (h, i) {
+      var col = headerMap[h];
+      sheet.getRange(currentRow, col).setValue(row[i]);
+    });
+
+    currentRow += 1;
+  });
+
+  // 12) Write the rows to the sheet (row‑by‑row so custom columns stay safe)
+  if (currentRow === 2) {
+    Logger.log('No active subscriptions or none processed.');
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function updateMembershipsLEGACY() {
 
   var SQUARE_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty('currentSquareAccessToken');
   
