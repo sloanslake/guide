@@ -688,7 +688,7 @@ function updateMembershipsLEGACY() {
   }
   // ────────────────────────────────────────────────────────────────
 
-  var rows = [];
+  var currentRow = 2;
 
   // 7) Loop over all subscriptions
   subscriptions.forEach(function(subscription) {
@@ -869,7 +869,7 @@ function updateMembershipsLEGACY() {
     }
 
     // 11) Construct the row with all required fields
-    rows.push([
+    var row = [
       publicName,
       subscriptionStatus,
       memberType,
@@ -888,17 +888,18 @@ function updateMembershipsLEGACY() {
       memberSince,
       customerId,
       subscriptionId
-    ]);
-  });
+    ];
 
-  // 12) Write the rows to the sheet (column‑by‑column so custom columns stay safe)
-  if (rows.length > 0) {
     headerValues.forEach(function (h, i) {
       var col = headerMap[h];
-      var colData = rows.map(function (r) { return [r[i]]; });
-      sheet.getRange(2, col, colData.length, 1).setValues(colData);
+      sheet.getRange(currentRow, col).setValue(row[i]);
     });
-  } else {
+
+    currentRow += 1;
+  });
+
+  // 12) Write the rows to the sheet (row‑by‑row so custom columns stay safe)
+  if (currentRow === 2) {
     Logger.log('No active subscriptions or none processed.');
   }
 }
