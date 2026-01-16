@@ -181,7 +181,6 @@ function onboardMember() {
 
 function updateMemberships() {
 
-  var numberToDoAtOnce = 2000;
   var numberToTakeABreak = 20;
   var secondsToBreakFor = 20;
 
@@ -307,16 +306,12 @@ function updateMemberships() {
   // ────────────────────────────────────────────────────────────────
 
   var currentRow = 2;
-  var maxRow = new Number(currentRow+numberToDoAtOnce);
 
   // 7) Loop over all subscriptions
   subscriptions.forEach(function(subscription) {
     //if (subscription.status !== 'ACTIVE') {
     //  return; // skip non-ACTIVE subscriptions
     //}
-    if (currentRow > maxRow) {
-      return;
-    }
 
   if (currentRow % numberToTakeABreak == 0) {
     Logger.log("We'll return after this short break.");
