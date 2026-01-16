@@ -181,10 +181,20 @@ function onboardMember() {
 
 function updateMemberships() {
 
-  var numberToTakeABreak = 20;
-  var secondsToBreakFor = 20;
+  // Takes about 15 seconds to prepare the subscriptions
+  // and about 1.5 seconds to go through one subscription.
+  // Max iteration of 40 takes about 60-75 seconds total.
+  var maxIterationsPerRun = 50;
 
-  var SQUARE_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty('currentSquareAccessToken');
+  // These used to be helpful, but now it's better to use
+  // max iterations variable to stop Square's exceeding bandwidth  
+  var numberToTakeABreak = 2000; // 20 iterations helps
+  var secondsToBreakFor = 2; // 20 seconds helps
+   
+  var scriptProperties = PropertiesService.getScriptProperties();
+  var cursorPropertyKey = 'updateMembershipsCursorIndex';
+
+  var SQUARE_ACCESS_TOKEN = scriptProperties.getProperty('currentSquareAccessToken');
   
 
   // 2) Define the Square endpoints you’ll need
@@ -241,6 +251,15 @@ function updateMemberships() {
     Logger.log('No subscriptions found.');
     return;
   }
+
+  var cursorIndex = parseInt(scriptProperties.getProperty(cursorPropertyKey), 10);
+  if (isNaN(cursorIndex) || cursorIndex < 0) {
+    cursorIndex = 0;
+  }
+  if (cursorIndex >= subscriptions.length) {
+    cursorIndex = 0;
+  }
+  var endIndex = Math.min(cursorIndex + maxIterationsPerRun, subscriptions.length);
 
 
   var partnershipCatalogIDs = ['J73AAE5CNSVL7JI5M2BMGMWJ','RG3UXLGIZT6HHLZGLOSZT37B','RRKMZP53A7Y75A3LUPQTLCFC','JPSK4FNPQREMXPRGYEJ3K5WO','5BPONADIBXCHNSK3CXE6BDCM'];
@@ -305,10 +324,11 @@ function updateMemberships() {
   }
   // ────────────────────────────────────────────────────────────────
 
-  var currentRow = 2;
+  var currentRow = cursorIndex + 2;
 
   // 7) Loop over all subscriptions
-  subscriptions.forEach(function(subscription) {
+  for (var subscriptionIndex = cursorIndex; subscriptionIndex < endIndex; subscriptionIndex++) {
+    var subscription = subscriptions[subscriptionIndex];
     //if (subscription.status !== 'ACTIVE') {
     //  return; // skip non-ACTIVE subscriptions
     //}
@@ -522,11 +542,19 @@ function updateMemberships() {
     });
 
     currentRow += 1;
-  });
+  }
 
   // 12) Write the rows to the sheet (row‑by‑row so custom columns stay safe)
   if (currentRow === 2) {
     Logger.log('No active subscriptions or none processed.');
+  }
+
+  if (endIndex >= subscriptions.length) {
+    scriptProperties.deleteProperty(cursorPropertyKey);
+    Logger.log('Finished processing all subscriptions. Cursor reset.');
+  } else {
+    scriptProperties.setProperty(cursorPropertyKey, String(endIndex));
+    Logger.log('Processed subscriptions ' + cursorIndex + ' to ' + (endIndex - 1) + '.');
   }
 }
 
