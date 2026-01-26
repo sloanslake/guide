@@ -1,3 +1,5 @@
+// This is a Google Apps Script file
+
 function testFunction(){
   return true;
 }
