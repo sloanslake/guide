@@ -194,12 +194,13 @@ function updateMemberships() {
   // Max calls to Square API is 5 per second (stated as "300 requests per minute")
   // Preparation makes at least 1 request, and takes at least 15 secs
   // Each subscriber makes at most 4 requests, and at takes at least 1.5 secs (without breaks)
-  var maxNumberOfSubscribersAtOnce = 35; // 35 works (50 often outlasts the 4.5m max execution time)
-  var secondsToBreakBetweenEachRequest = .5; // .4 works (.3 quickly overloads Square API bandwidths)
-  var numberOfSubscribersToTakeABreak = 5; // 10 works (0 overloads Square API bandwidth)
+  var maxNumberOfSecondsToRunFor = 220; // 220 works (gives 80 second break between runs)
+  var secondsToBreakBetweenEachRequest = .4; // .4 works (.3 quickly overloads Square API bandwidths)
+  var numberOfSubscribersToTakeABreak = 20; // 10 works (0 overloads Square API bandwidth)
   var secondsToBreakOfSubscribers = 5; // 10 works (0 overloads Square API bandwidth)
-  var secondsToBreakBeforeLoopingThroughSubscribers = 5; // 5 works (0 can overload in first 10 subscriptions)
+  var secondsToBreakBeforeLoopingThroughSubscribers = 0; // 5 works (0 can overload in first 10 subscriptions)
   var secondsToBreakBetweenEachSubscriber = 0; // 0 works (doesn't help)
+  var maxNumberOfSubscribersAtOnce = 2000; // 35 works (50 often outlasts the 4.5m max execution time)
   var skipAheadIfRequestIsSlow = false;
 
 
@@ -367,9 +368,9 @@ function updateMemberships() {
 
 
 
-    if (new Date().getTime() - timeStamp0 > 270*1000) {
-      Logger.log("It took over 4.5 minutes updating memberships. Don't proceed!");
-      MailApp.sendEmail("sean@sloanslakefoundation.org","Oops! Membership error","It took over 4.5 minutes updating memberships, so I didn't proceed");
+    if (new Date().getTime() - timeStamp0 > maxNumberOfSecondsToRunFor*1000) {
+      Logger.log("We've reached the max time limit. Don't proceed!");
+      //MailApp.sendEmail("sean@sloanslakefoundation.org","Oops! Membership error","Maxxed out time limit, so I didn't proceed");
       return;
     }
 
@@ -631,6 +632,7 @@ function updateMemberships() {
     });
 
     currentRow += 1;
+    scriptProperties.setProperty(cursorPropertyKey, String(subscriptionIndex + 1));
   }
 
   // 12) Write the rows to the sheet (row‑by‑row so custom columns stay safe)
@@ -643,7 +645,7 @@ function updateMemberships() {
     Logger.log('Finished processing all subscriptions. Cursor reset.');
     return;
   } else {
-    scriptProperties.setProperty(cursorPropertyKey, String(endIndex));
+    //scriptProperties.setProperty(cursorPropertyKey, String(endIndex));
     Logger.log('Processed subscriptions ' + cursorIndex + ' to ' + (endIndex - 1) + '.');
     return;
   }
@@ -1470,7 +1472,7 @@ function listPublicCalendarEventsFormattedStyled(calendarId, startDateStr, endDa
   
   // Outer container defines color, font, size, line spacing, and hanging indent
   var html = '<div style="'
-           +   'color: #002040; '
+           +   'color: #000000; '
            +   'font-family: \'Oswald\', sans-serif; '
            +   'font-weight: 300; '
            +   'font-size: 9pt; '
@@ -2359,4 +2361,252 @@ function saveCreditsAsPdf(fileName,fileId,folderId) {
   Logger.log('PDF created and saved to Google Drive: %s', pdfFile.getUrl());
 
   return pdfFile.getUrl();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**************************************
+ * Print-ready booklet PDF from Slides
+ * Author: You + ChatGPT
+ * Requirements:
+ *  - Enable Advanced Services: Slides API, Drive API
+ *  - (Recommended) Create a Letter 11x8.5 in Landscape template Slides
+ **************************************/
+
+// === SETTINGS ==============================================================
+// Your letter-size (11x8.5 in) landscape template ID:
+const BOOKLET_TEMPLATE_ID = '1blkvcc9Evx1l8_ZsjXSfLX12_bqVHb7sDtFO4JINYnA';
+
+// Keep the temporary 2-up Slides file?
+const KEEP_INTERMEDIATE_SLIDES = false;
+
+// Output name suffix
+const OUTPUT_NAME_SUFFIX = ' - Print';
+
+// Slide thumbnail size pulled from the source
+const THUMBNAIL_SIZE = 'LARGE'; // LARGE | MEDIUM | SMALL
+
+// Duplex/binding behavior:
+// 'SHORT_EDGE' (default) for typical landscape booklet printing.
+// 'LONG_EDGE' if your printer is locked to long-edge duplex and cannot be changed.
+const BINDING = 'SHORT_EDGE'; // 'SHORT_EDGE' | 'LONG_EDGE'
+
+// Flip the *entire* booklet 180° (to compensate for asymmetric printer margins).
+// NOTE: With LONG_EDGE binding, we only swap L/R on FRONT sides.
+const ROTATE_WHOLE_BOOKLET_180 = false;
+
+// NEW: Reverse the order of the final spreads (e.g., last spread becomes first).
+const REVERSE_FINAL_SPREAD_ORDER = true;
+// ==========================================================================
+
+/**
+ * Main entry: builds a 2-up, letter-sized, imposition-ordered PDF.
+ */
+function makePrintReadyBookletPDF(sourcePresentation) {
+  const srcPres = sourcePresentation;
+  const srcId   = srcPres.getId();
+  const srcTitle = srcPres.getName();
+  const srcSlides = srcPres.getSlides();
+  if (srcSlides.length === 0) {
+    SlidesApp.getUi().alert('This presentation has no slides.');
+    return;
+  }
+
+  // Collect slide thumbnails as PNG blobs.
+  const pageBlobs = srcSlides.map((s, idx) => {
+    const pageId = s.getObjectId();
+    const res = Slides.Presentations.Pages.getThumbnail(
+      srcId,
+      pageId,
+      {
+        "thumbnailProperties.mimeType": "PNG",
+        "thumbnailProperties.thumbnailSize": THUMBNAIL_SIZE
+      }
+    );
+    const blob = UrlFetchApp.fetch(res.contentUrl).getBlob().setName(`page_${idx+1}.png`);
+    return blob;
+  });
+
+  // Compute booklet imposition order (pad to multiple of 4).
+  const sheetSides = computeBookletOrder_(pageBlobs.length);
+
+  // Optionally reverse the final spread order.
+  const finalSides = REVERSE_FINAL_SPREAD_ORDER ? [...sheetSides].reverse() : sheetSides;
+
+  // Build a 2-up (letter landscape) Slides and place images edge-to-edge.
+  const outTitle = `${srcTitle}${OUTPUT_NAME_SUFFIX}`;
+  const targetId = createTargetLetterLandscape_(outTitle);
+  const target = SlidesApp.openById(targetId);
+
+  // Remove the initial slide the template/creator provides (we’ll add all new slides as blank).
+  const existing = target.getSlides();
+  if (existing.length) existing[0].remove();
+
+  // For each side (front/back), add a slide and place left/right halves.
+  const LETTER_W_PT = 11 * 72;      // 792
+  const LETTER_H_PT = 8.5 * 72;     // 612
+  const HALF_W_PT   = LETTER_W_PT / 2; // 396
+
+  finalSides.forEach((side) => {
+    const { leftIndex, rightIndex, isBackSide } = side;
+    const slide = target.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+
+    // Decide if this side should swap L/R (to preserve reading order after 180° flip).
+    const swapLR = shouldSwapLeftRight_(isBackSide);
+
+    const effectiveLeft  = swapLR ? rightIndex : leftIndex;
+    const effectiveRight = swapLR ? leftIndex  : rightIndex;
+
+    // LEFT half
+    if (effectiveLeft != null) {
+      const imgL = slide.insertImage(pageBlobs[effectiveLeft]);
+      imgL.setLeft(0).setTop(0).setWidth(HALF_W_PT).setHeight(LETTER_H_PT);
+    } else {
+      drawWhiteRect_(slide, 0, 0, HALF_W_PT, LETTER_H_PT);
+    }
+
+    // RIGHT half
+    if (effectiveRight != null) {
+      const imgR = slide.insertImage(pageBlobs[effectiveRight]);
+      imgR.setLeft(HALF_W_PT).setTop(0).setWidth(HALF_W_PT).setHeight(LETTER_H_PT);
+    } else {
+      drawWhiteRect_(slide, HALF_W_PT, 0, HALF_W_PT, LETTER_H_PT);
+    }
+
+    // Rotation: LONG_EDGE rotates *back* sides 180°; whole-booklet adds 180° to all sides.
+    let rotateDeg = 0;
+    if (BINDING === 'LONG_EDGE' && isBackSide) rotateDeg += 180;
+    if (ROTATE_WHOLE_BOOKLET_180)             rotateDeg += 180;
+    rotateDeg %= 360;
+    if (rotateDeg) rotateAllElements_(slide, rotateDeg);
+  });
+
+  target.setName(`${outTitle}`);
+  target.saveAndClose();
+
+  // Export the assembled 2-up Slides to PDF, save next to source.
+  const parentFolder = getFirstParentFolder_(srcId) || DriveApp.getRootFolder();
+  const pdfBlob = DriveApp.getFileById(targetId).getAs(MimeType.PDF).setName(`${outTitle}.pdf`);
+  const pdfFile = parentFolder.createFile(pdfBlob);
+
+  // Optionally delete the intermediate 2-up Slides.
+  if (!KEEP_INTERMEDIATE_SLIDES) {
+    Drive.Files.remove(targetId);
+  }
+
+  // Tailored tip based on binding choice
+  const tip = (BINDING === 'LONG_EDGE')
+    ? 'Tip: PDF compensates for LONG-edge duplex; if adjustable, print “flip on long edge.”'
+    : 'Tip: For most printers, use 2-sided “flip on short edge.”';
+
+  return pdfFile.getUrl();
+}
+
+/**
+ * Decide if we should swap left/right placement for this side.
+ * Matrix:
+ *  - SHORT_EDGE:
+ *      - whole booklet rot OFF → no swap
+ *      - whole booklet rot ON  → swap ALL sides
+ *  - LONG_EDGE:
+ *      - whole booklet rot OFF → swap BACK sides only
+ *      - whole booklet rot ON  → swap FRONT sides only
+ */
+function shouldSwapLeftRight_(isBackSide) {
+  if (BINDING === 'SHORT_EDGE') {
+    return !!ROTATE_WHOLE_BOOKLET_180; // swap all sides iff whole-booklet rotation
+  }
+
+  // BINDING === 'LONG_EDGE'
+  if (ROTATE_WHOLE_BOOKLET_180) {
+    return !isBackSide;               // swap fronts only
+  } else {
+    return isBackSide;                // swap backs only
+  }
+}
+
+/**
+ * Compute imposition order for 2-up booklet (letter landscape), pad to multiple of 4.
+ * Returns array of {leftIndex, rightIndex, isBackSide} (0-based indexes into original pages) for each spread.
+ */
+function computeBookletOrder_(pageCount) {
+  const padded = pageCount % 4 === 0 ? pageCount : pageCount + (4 - (pageCount % 4));
+  const pages = Array.from({length: padded}, (_, i) => (i < pageCount ? i : null));
+  const sheets = padded / 4;
+  const sides = [];
+
+  for (let i = 0; i < sheets; i++) {
+    // Front side: [last - 2*i] | [first + 2*i]
+    const frontLeft  = padded - 1 - (2 * i);
+    const frontRight = (2 * i);
+    sides.push({ leftIndex: pages[frontLeft], rightIndex: pages[frontRight], isBackSide: false });
+
+    // Back side: [first + 2*i + 1] | [last - 2*i - 1]
+    const backLeft  = (2 * i) + 1;
+    const backRight = padded - 2 - (2 * i);
+    sides.push({ leftIndex: pages[backLeft], rightIndex: pages[backRight], isBackSide: true });
+  }
+  return sides;
+}
+
+/**
+ * Create the target Slides where we lay out 2-up pages.
+ * If BOOKLET_TEMPLATE_ID is set, we copy it (preserves letter landscape size).
+ * Otherwise we create a new presentation (will be 16:9 by default).
+ */
+function createTargetLetterLandscape_(title) {
+  if (BOOKLET_TEMPLATE_ID && BOOKLET_TEMPLATE_ID !== 'PUT_YOUR_LETTER_LANDSCAPE_TEMPLATE_ID_HERE') {
+    // Copy the letter-sized landscape template (preserves page size exactly).
+    const copy = Drive.Files.copy({ title }, BOOKLET_TEMPLATE_ID);
+    return copy.id;
+  } else {
+    // Fallback: creates default 16:9; PDF will be 16:9, not letter (set a template to get true letter size).
+    return SlidesApp.create(title).getId();
+  }
+}
+
+/**
+ * Rotate all elements on a slide by N degrees (adds to existing rotation).
+ */
+function rotateAllElements_(slide, degrees) {
+  const elements = slide.getPageElements();
+  for (var i = 0; i < elements.length; i++) {
+    try {
+      const el = elements[i];
+      el.setRotation((el.getRotation() + degrees) % 360);
+    } catch (e) {
+      // Ignore elements that cannot be rotated
+    }
+  }
+}
+
+/**
+ * Draws a white rectangle (for blank halves if we padded pages).
+ */
+function drawWhiteRect_(slide, x, y, w, h) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill('#FFFFFF');
+  try { shape.getLine().setWeight(0); } catch (e) {}
+}
+
+/**
+ * Get the first parent folder of a file by ID.
+ */
+function getFirstParentFolder_(fileId) {
+  const file = DriveApp.getFileById(fileId);
+  const parents = file.getParents();
+  return parents.hasNext() ? parents.next() : null;
 }
